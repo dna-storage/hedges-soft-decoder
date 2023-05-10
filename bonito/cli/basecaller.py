@@ -14,7 +14,7 @@ from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
 from bonito.aligner import align_map, Aligner
 from bonito.reader import read_chunks, Reader
-from bonito.io import CTCWriter, Writer, biofmt
+from bonito.io import CTCWriter,Writer, biofmt
 from bonito.mod_util import call_mods, load_mods_model
 from bonito.cli.download import File, models, __models__
 from bonito.multiprocessing import process_cancel, process_itemmap
@@ -56,7 +56,7 @@ def main(args):
             overlap=args.overlap,
             batchsize=args.batchsize,
             quantize=args.quantize,
-            use_koi=True,
+            use_koi=(not args.disable_koi)
         )
     except FileNotFoundError:
         sys.stderr.write(f"> error: failed to load {args.model_directory}\n")
@@ -126,10 +126,16 @@ def main(args):
         ResultsWriter = Writer
 
     results = basecall(
-        model, reads, reverse=args.revcomp, rna=args.rna,
+        model, reads, reverse=args.revcomp,
         batchsize=model.config["basecaller"]["batchsize"],
         chunksize=model.config["basecaller"]["chunksize"],
-        overlap=model.config["basecaller"]["overlap"]
+        overlap=model.config["basecaller"]["overlap"],
+        hedges_params=args.hedges_params,
+        hedges_bytes=args.hedges_bytes,
+        hedges_using_DNA_constraint=args.hedges_use_dna_constraint,
+        strand_pad=args.strand_pad,
+        rna=args.rna,
+        
     )
     
     if mods_model is not None:
@@ -202,4 +208,11 @@ def argparser():
     parser.add_argument("--min-accuracy-save-ctc", default=0.99, type=float)
     parser.add_argument("--alignment-threads", default=8, type=int)
     parser.add_argument('-v', '--verbose', action='count', default=0)
+
+    #arguments to be used with hedges basecalling
+    parser.add_argument("--hedges_params",default=None,help="Path to json file describing hedges parameter")
+    parser.add_argument("--hedges_bytes",type=int,default=None,nargs="+",help="Bytes to fastforward hedges state to")
+    parser.add_argument("--hedges_use_dna_constraint",default=False,action="store_true",help = "Include this flag to include DNA Constraint information in hedges trellis")
+    parser.add_argument("--strand_pad",action="store",default="",help="Optional padding strand that will be aligned to trim score endpoints")
+    parser.add_argument("--disable_koi",default=False,action="store_true",help="Use this flag when using CTC-based model to avoid errors")
     return parser

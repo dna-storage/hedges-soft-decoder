@@ -10,8 +10,11 @@ from bonito.multiprocessing import process_map
 from bonito.util import mean_qscore_from_qstring
 from bonito.util import chunk, stitch, batchify, unbatchify, permute
 
+from bonito.hedges_decode import hedges_decode
 
-def basecall(model, reads, beamsize=5, chunksize=0, overlap=0, batchsize=1, qscores=False, reverse=None):
+import pickle
+
+def basecall(model, reads, beamsize=5, chunksize=0, overlap=0, batchsize=1, qscores=False, reverse=None,**kwargs):
     """
     Basecalls a set of reads.
     """
@@ -24,7 +27,14 @@ def basecall(model, reads, beamsize=5, chunksize=0, overlap=0, batchsize=1, qsco
     scores = (
         (read, {'scores': stitch(v, chunksize, overlap, len(read.signal), model.stride)}) for read, v in scores
     )
-    decoder = partial(decode, decode=model.decode, beamsize=beamsize, qscores=qscores, stride=model.stride)
+
+
+    if kwargs.get("hedges_params",None)!=None:
+        decoder = partial(hedges_decode,hedges_params = kwargs["hedges_params"],hedges_bytes=kwargs["hedges_bytes"],
+                          using_hedges_DNA_constraint=kwargs["hedges_using_DNA_constraint"],alphabet=model.alphabet,endpoint_seq=kwargs["strand_pad"])
+    else:
+        decoder = partial(decode, decode=model.decode, beamsize=beamsize, qscores=qscores, stride=model.stride)
+    #pickle.dump([(read,s['scores']) for read,s in scores],open("debug_scores","wb+"))
     basecalls = process_map(decoder, scores, n_proc=4)
     return basecalls
 
@@ -35,7 +45,8 @@ def compute_scores(model, batch):
     """
     with torch.no_grad():
         device = next(model.parameters()).device
-        chunks = batch.to(torch.half).to(device)
+        #chunks = batch.to(torch.half).to(device)
+        chunks = batch.to(torch.float32).to(device)
         probs = permute(model(chunks), 'TNC', 'NTC')
     return probs.cpu().to(torch.float32)
 
@@ -59,3 +70,4 @@ def decode(scores, decode, beamsize=5, qscores=False, stride=1):
             pass
 
     return {'sequence': seq, 'qstring': qstring, 'stride': stride, 'moves': path}
+

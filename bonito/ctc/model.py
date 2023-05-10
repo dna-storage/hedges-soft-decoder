@@ -3,12 +3,14 @@ Bonito Model template
 """
 
 import numpy as np
+import inspect
 from bonito.nn import Permute, layers
 import torch
 from torch.nn.functional import log_softmax, ctc_loss
 from torch.nn import Module, ModuleList, Sequential, Conv1d, BatchNorm1d, Dropout
-
 from fast_ctc_decode import beam_search, viterbi_search
+
+from bonito.hedges_decode import hedges_decode
 
 
 class Model(Module):

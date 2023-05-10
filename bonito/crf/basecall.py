@@ -57,7 +57,7 @@ def fmt(stride, attrs, rna=False):
 
 
 def basecall(model, reads, chunksize=4000, overlap=100, batchsize=32,
-             reverse=False, rna=False):
+             reverse=False, rna=False,**kwargs):
     """
     Basecalls a set of reads.
     """

@@ -5,7 +5,6 @@ Bonito Aligner
 from threading import Thread
 from functools import partial
 from mappy import Aligner, ThreadBuffer
-
 from bonito.multiprocessing import ThreadMap
 
 

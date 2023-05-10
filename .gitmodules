@@ -1,0 +1,3 @@
+[submodule "schwimmbad"]
+	path = schwimmbad
+	url = https://github.ncsu.edu/dna-based-storage/schwimmbad
