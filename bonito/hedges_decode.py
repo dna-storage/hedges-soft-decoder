@@ -4,9 +4,16 @@ import math
 import numpy as np
 import json
 import inspect
+import bonito.cuda_utils as cu
 from collections import namedtuple
 import dnastorage.codec.hedges as hedges
 import dnastorage.codec.hedges_hooks as hedges_hooks
+import cupy as cp
+
+
+
+import time
+
 
 reverse_map={"A":"T","T":"A","C":"G","G":"C"}
 def reverse_complement(seq:str)->str:
@@ -51,7 +58,8 @@ class HedgesBonitoBase:
     def init_initial_state_F(self,scores:torch.Tensor,F:torch.Tensor)->None:
         raise NotImplementedError()
 
-    def forward_step(self,scores:torch.Tensor,base_transitions:torch.Tensor,F:torch.Tensor,initial_bases:torch.Tensor,strand_index:int)->tuple[torch.Tensor,torch.Tensor]:
+    def forward_step(self,scores:torch.Tensor,base_transitions:torch.Tensor,F:torch.Tensor,initial_bases:torch.Tensor,strand_index:int,
+                     nbits:int)->tuple[torch.Tensor,torch.Tensor]:
         raise NotImplementedError()
     
     def calculate_trellis_connections(self, bit_range:range, trellis_states:int) -> tuple[list[torch.Tensor],...]:
@@ -101,9 +109,9 @@ class HedgesBonitoBase:
         return_sequence=""
         for i in torch.flip(torch.arange(L,dtype=torch.int64),dims=(0,)):
             #print(current_state)
-            return_sequence+=self._alphabet[int(BT_bases[current_state.to(torch.int64),i])]
+            return_sequence+=self._alphabet[int(BT_bases[current_state,i])]
             if i==0: break
-            current_state=BT_index[current_state.to(torch.int64),i]
+            current_state=BT_index[current_state,i]
         return return_sequence[::-1]
     
     def decode(self,scores:torch.Tensor,reverse:bool)->str:
@@ -116,8 +124,8 @@ class HedgesBonitoBase:
         """
         self._T = scores.size(0) #time dimension 
         #setup backtracing matricies
-        BT_index = torch.full((self._H,self._L),0,dtype=torch_get_index_dtype(self._H)) #index backtrace matrix
-        BT_bases = torch.full((self._H,self._L),0,dtype=torch.uint8) #base value backtrace matrix
+        BT_index = torch.full((self._H,self._L),0,dtype=torch.int64)#dtype=torch_get_index_dtype(self._H)) #index backtrace matrix
+        BT_bases = torch.full((self._H,self._L),0,dtype=torch.int64)#dtype=torch.uint8) #base value backtrace matrix
         C1 = [hedges_hooks.make_context(self._global_hedge_state_init) for _ in range(0,self._H)]
         C2 = [hedges_hooks.make_context(self._global_hedge_state_init) for _ in range(0,self._H)]
         current_C=C1
@@ -139,19 +147,25 @@ class HedgesBonitoBase:
         print(F.size())
         for i in range(self._full_message_length-self._L,self._full_message_length):
             print(i)
+            loop_time=time.time()
             nbits = hedges_hooks.get_nbits(self._global_hedge_state_init,i)
             trellis_incoming_indexes=self._trellis_connections[nbits] #Hx2^nbits matrix indicating incoming states from the previous time step
             trellis_incoming_value = self._trellis_transition_values[nbits]
-            base_transition_outgoing = torch.full((self._H,2**nbits),0,dtype=torch.uint8)
+            base_transition_outgoing = torch.full((self._H,2**nbits),0,dtype=torch.int64)
             self.fill_base_transitions(base_transition_outgoing,current_C,nbits,reverse)
             if i-sub_length==0:
                 starting_bases = torch.full((self._H,),self._letter_to_index[self.fastforward_seq[-1]])[:,None].expand(-1,2**nbits)
             else:
                 starting_bases = BT_bases[:,i-sub_length-1][:,None].expand(-1,2**nbits)
-            state_transition_scores_outgoing, temp_f_outgoing = self.forward_step(scores,base_transition_outgoing,F,starting_bases,i)
+
+            init_time=time.time()
+            print("Top loop init time {}".format(init_time-loop_time))
+            state_transition_scores_outgoing, temp_f_outgoing = self.forward_step(scores,base_transition_outgoing,F,starting_bases,i,nbits)
+            forward_step_time = time.time()
+            print("Step time {}".format(forward_step_time-init_time))
             #get incoming bases and scores coming in to each state so that the best one can be selected
-            state_scores = state_transition_scores_outgoing[trellis_incoming_indexes.to(torch.int64),trellis_incoming_value.to(torch.int64)] #should produce Hx2^n matrix of scores that need to be compared
-            bases = base_transition_outgoing[trellis_incoming_indexes.to(torch.int64),trellis_incoming_value.to(torch.int64)]#Hx2^n matrix of bases to add
+            state_scores = state_transition_scores_outgoing[trellis_incoming_indexes,trellis_incoming_value] #should produce Hx2^n matrix of scores that need to be compared
+            bases = base_transition_outgoing[trellis_incoming_indexes,trellis_incoming_value]#Hx2^n matrix of bases to add
             value_of_max_scores= torch.argmax(state_scores,dim=1) # H-length vectror indicating location of best score
             current_scores=state_scores.gather(1,value_of_max_scores[:,None])
 
@@ -159,10 +173,14 @@ class HedgesBonitoBase:
             BT_index[:,i-sub_length] = trellis_incoming_indexes[torch.arange(self._H),value_of_max_scores] #set the back trace index with best incoming state
             BT_bases[:,i-sub_length] = bases[torch.arange(self._H),value_of_max_scores] #set base back trace matrix
 
+            back_trace_time = time.time()
+            print("BT time {}".format(back_trace_time-forward_step_time))
             #update forward arrays
-            incoming_F = temp_f_outgoing[:,trellis_incoming_indexes.to(torch.int64),trellis_incoming_value.to(torch.int64)]
+            incoming_F = temp_f_outgoing[:,trellis_incoming_indexes,trellis_incoming_value]
             F = incoming_F[:,torch.arange(self._H),value_of_max_scores]
-                        
+            f_time = time.time()
+            print("F update time {}".format(f_time-back_trace_time)) 
+            
             for r in torch.arange(self._H):
                 state = BT_index[r,i-sub_length]
                 val = trellis_incoming_value[r,0]
@@ -171,6 +189,10 @@ class HedgesBonitoBase:
             t=current_C
             current_C=other_C
             other_C=t
+            end_loop_time=time.time()
+            c_time = time.time()
+            print("C time {}".format(c_time-f_time))
+            print("End loop time {}".format(end_loop_time-forward_step_time))
             
         print(current_scores)
         for x in range(current_scores.size(0)):
@@ -195,6 +217,33 @@ class HedgesBonitoCTC(HedgesBonitoBase):
     
     def get_initial_trellis_index(self,global_hedge_state)->int:
         return 0
+
+    @classmethod
+    def _fwd_algorithm(cls,target_scores:torch.Tensor,mask:torch.Tensor,
+                       F:torch.Tensor,lower_t_range:int,upper_t_range:int)->torch.Tensor:
+        running_alpha_index=2
+        T,H,E,L=target_scores.size()
+        alpha_t = torch.full((T,H,E),Log.zero)
+        running_alpha =torch.full((H,E,L+2),Log.zero)
+        log_zeros = torch.full((H,E,L),Log.zero)
+        print("zeros {}".format(log_zeros.size(0)*log_zeros.size(1)))
+        results_stack=torch.full((3,running_alpha.size(0),running_alpha.size(1),running_alpha.size(2)-running_alpha_index),Log.zero)
+        for t in torch.arange(lower_t_range,upper_t_range):
+            loop_start_time=time.time()
+            running_alpha[:,:,running_alpha_index-1] = F[t-1,:][:,None]
+            slice_time=time.time()
+            #print("slice data time {}".format(slice_time-loop_start_time))
+            results_stack[0,:,:,:] = running_alpha[:,:,running_alpha_index:]
+            results_stack[1,:,:,:] = running_alpha[:,:,running_alpha_index-1:-1]
+            stack_time=time.time()
+            #print("stack time {}".format(loop_start_time-stack_time))
+            results_stack[2,:,:,:] = torch.where(mask,log_zeros,running_alpha[:,:,running_alpha_index-2:-2])
+            running_alpha[:,:,running_alpha_index:]= Log.mul(target_scores[t,:,:,:],Log.sum(results_stack,dim=0))
+            alpha_time=time.time()
+            #print("alpha_time {}".format(alpha_time-loop_start_time))
+            alpha_t[t,:,:]=running_alpha[:,:,-1]
+        return alpha_t
+
 
     @classmethod
     def string_to_indexes(cls,seq:str,letter_to_index:dict)->torch.Tensor:
@@ -242,55 +291,42 @@ class HedgesBonitoCTC(HedgesBonitoBase):
 
         @return     return tuple of tensors (X,Y) where X is a Hx2^nbits tensor of scores, and Y is a TxHx2^nbits tensor of outgoing alpha calculations
         """
+        start=time.time()
         T,A = scores.size()
         H,E = base_transitions.size()
         #need to create a Hx2^nbitsxL tensor to represent all strings we are calculating alphas for
-        targets = torch.stack([initial_bases,torch.zeros((H,E),dtype=torch.uint8),base_transitions],dim=2)
+        targets = torch.stack([initial_bases,scores.new_zeros((H,E),dtype=torch.int64),base_transitions],dim=2)
         _,_2,L = targets.size()
         targets=targets[None,:,:,:].expand(T,-1,-1,-1) #expand the targets along the time dimension 
-        target_scores = torch.gather(scores[:,None,None,:].expand(-1,H,E,-1),3,targets.to(torch.int64)) #gather in the scores for the targets
-        alpha_t = torch.full((T,H,E),Log.zero)
-        
-        if strand_index==0: #earliest time computation will be "-1", so need to actually compute all alphas here
-            running_alpha = torch.full((H,E,L+2),Log.zero)
-            running_alpha_index=2
-            running_alpha[:,:,running_alpha_index]=Log.one 
-            log_zeros = running_alpha.new_full((H,E,L),Log.zero)
-            mask = torch.nn.functional.pad(targets[0,:,:,2:]==targets[0,:,:,:-2],(2,0),value=1)
-        else:
-            running_alpha_index=2
-            running_alpha = self._forward_running_alphas[nbits].fill_(Log.zero) #torch.full((H,E,L+1),Log.zero)
-            log_zeros = self._forward_zeros[nbits] #running_alpha.new_full((H,E,L-1),Log.zero)
-            mask = torch.nn.functional.pad(targets[0,:,:,2:]==targets[0,:,:,:-2],(1,0),value=1)
-            target_scores=target_scores[:,:,:,1:]
-
+        target_scores = torch.gather(scores[:,None,None,:].expand(-1,H,E,-1),3,targets) #gather in the scores for the targets
+        mask = torch.nn.functional.pad(targets[0,:,:,2:]==targets[0,:,:,:-2],(1,0),value=1)
+        target_scores=target_scores[:,:,:,1:]
         #calculate valid ranges of t to avoid unnecessary iterations
         lower_t_range=strand_index
         upper_t_range=T-self._full_message_length+strand_index+1
-        for t in torch.arange(lower_t_range,upper_t_range):
-            running_alpha[:,:,running_alpha_index-1] = F[t-1,:][:,None]        
-            running_alpha[:,:,running_alpha_index:]= Log.mul(target_scores[t,:,:,:],Log.sum(torch.stack([running_alpha[:,:,running_alpha_index:],running_alpha[:,:,running_alpha_index-1:-1],torch.where(mask,log_zeros,running_alpha[:,:,running_alpha_index-2:-2])]),dim=0))
-            alpha_t[t,:,:]=running_alpha[:,:,-1]
-
+        init_time=time.time()
+        print("Time to init fwd {}".format(init_time-start))
+        alpha_t = self._fwd_algorithm(target_scores,mask,F,lower_t_range,upper_t_range)        
+        fwd_time=time.time()
         log_prob_no_transition=torch.nn.functional.pad(
             Log.sum(torch.stack([torch.zeros((T,H,E)),target_scores[:,:,:,-1]]),dim=0), 
             (0,0,0,0,0,1),value=Log.one)[1:,:,:] #TxHx2^nbits tensor to help with final score calculation
         out_scores = dot(log_prob_no_transition,alpha_t[:,:,:],dim=0) #Hx2^nbits output
+        score_time=time.time()
+        print("Time to calculate dot product {}".format(score_time-fwd_time))
         return out_scores,alpha_t[:,:,:]
         
     def __init__(self, hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet) -> None:
             super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet)
             self._trellis_connections,self._trellis_transition_values = self.calculate_trellis_connections(range(0,3),self._H) #list of matrices with trellis connections for different points in the codeword
-            self._forward_zeros=[torch.full((self._H,2**n,2),Log.zero) for n in range(0,2)]
-            self._forward_running_alphas=[torch.full((self._H,2**n,4),Log.zero) for n in range(0,2)]
-
+         
     def calculate_trellis_connections(self, bit_range: range, trellis_states: int) -> tuple[list[torch.Tensor], ...]:
         index_list=[]
         value_list=[]
         dtype = torch_get_index_dtype(trellis_states)
         for nbits in bit_range:
-            incoming_states_matrix=torch.full((trellis_states,2**nbits),0,dtype=dtype)
-            incoming_state_value_matrix=torch.full((trellis_states,2**nbits),0,dtype=dtype)
+            incoming_states_matrix=torch.full((trellis_states,2**nbits),0,dtype=torch.int64)
+            incoming_state_value_matrix=torch.full((trellis_states,2**nbits),0,dtype=torch.int64)
             for h in range(trellis_states):
                 value,incoming_states = hedges_hooks.get_incoming_states(self._global_hedge_state_init,nbits,h)
                 for prev_index,s_in in incoming_states:
@@ -300,6 +336,34 @@ class HedgesBonitoCTC(HedgesBonitoBase):
             value_list.append(incoming_state_value_matrix)
         return index_list,value_list
 
+
+class HedgesBonitoCTCGPU(HedgesBonitoCTC):
+    def __init__(self, hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet) -> None:
+        super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet)
+        assert torch.cuda.is_available() #make sure we have cuda for this class
+      
+
+    @classmethod
+    def _fwd_algorithm(cls, target_scores: torch.Tensor,mask: torch.Tensor,
+                       F: torch.Tensor, lower_t_range: int, upper_t_range: int)->torch.Tensor:
+        kernel=cu.load_cupy_func("cuda/ctc_fwd.cu","fwd_logspace",FLOAT='float',SUM='logsumexp3',MUL='add',ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
+        T,H,E,L=target_scores.size()
+        alpha_t = torch.full((T,H,E),Log.zero)
+        #convert mask from bools to floats to avoid control flow in GPU kernel
+        mask = torch.where(mask,torch.full(mask.size(),Log.zero),torch.full(mask.size(),Log.one))
+        kernel_start_time=time.time()
+        x = target_scores.to("cuda:0")
+        y=alpha_t.to("cuda:0")
+        z=mask.to("cuda:0")
+        w=F.to("cuda:0")
+        with cp.cuda.Device(0):
+            kernel(grid=(1,1,1),block=(L,H,E),shared_mem=2*4*(L+2)*H*E,args=(x.data_ptr(),y.data_ptr(),
+                                                                               z.data_ptr(),w.data_ptr(),lower_t_range,
+                                                                               upper_t_range,H,E,L,T,2))                   
+        print("Kernel run time {}".format(time.time()-kernel_start_time))
+        
+        return y.to("cpu")
+        
 class Align:
     def __init__(self,alphabet:list) -> None:
         self._alphabet=alphabet
@@ -319,7 +383,7 @@ class Align:
         T=scores.size(0)
         target_indexes = HedgesBonitoCTC.string_to_indexes(seq,self._letter_to_index)
         target_indexes = HedgesBonitoCTC.insert_blanks(target_indexes)
-        BT = torch.full((T,target_indexes.size(0)),0,dtype=torch.int16) #backtrace to know where alignment ranges over T
+        BT = torch.full((T,target_indexes.size(0)),0,dtype=torch.int64) #backtrace to know where alignment ranges over T
         F = torch.full((T,target_indexes.size(0)+1),Log.zero) #forward calculating Trellis
         target_indexes = target_indexes[None,:].expand(T,-1)
         emission_scores = scores.gather(1,target_indexes)
@@ -394,7 +458,7 @@ def hedges_decode(scores:torch.Tensor,hedges_params:str,hedges_bytes:bytes,
         print(e)
         exit(1)
 
-    decoder = HedgesBonitoCTC(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet)
+    decoder = HedgesBonitoCTCGPU(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet)
     #create aligner
     aligner = AlignCTC(alphabet)
     
@@ -408,8 +472,7 @@ def hedges_decode(scores:torch.Tensor,hedges_params:str,hedges_bytes:bytes,
 
     f_hedges_bytes_lower_index,f_hedges_bytes_upper_index,f_hedges_score = aligner.align(scores,decoder.fastforward_seq[::-1])
     r_hedges_bytes_lower_index,r_hedges_bytes_upper_index,r_hedges_score = aligner.align(scores,complement(decoder.fastforward_seq))
-
-
+    
     """
     We need to rearrange the scores based on alignments so that index is always at the beginning of the strand.
     Because we
