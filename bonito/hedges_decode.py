@@ -9,6 +9,7 @@ from collections import namedtuple
 import dnastorage.codec.hedges as hedges
 import dnastorage.codec.hedges_hooks as hedges_hooks
 import cupy as cp
+from numba import njit
 
 
 
@@ -145,14 +146,19 @@ class HedgesBonitoBase:
         """
         sub_length = self._full_message_length-self._L
         print(F.size())
+        scores_gpu= scores.to("cuda:0")
+        base_transition_outgoing_mem = torch.full((self._H,2**1),0,dtype=torch.int64)
+        H_range=torch.arange(self._H)
+        
         for i in range(self._full_message_length-self._L,self._full_message_length):
             print(i)
             loop_time=time.time()
             nbits = hedges_hooks.get_nbits(self._global_hedge_state_init,i)
+            base_transition_outgoing=base_transition_outgoing_mem[:,:2**nbits]
+            self.fill_base_transitions(base_transition_outgoing,current_C,nbits,reverse)                
+            
             trellis_incoming_indexes=self._trellis_connections[nbits] #Hx2^nbits matrix indicating incoming states from the previous time step
             trellis_incoming_value = self._trellis_transition_values[nbits]
-            base_transition_outgoing = torch.full((self._H,2**nbits),0,dtype=torch.int64)
-            self.fill_base_transitions(base_transition_outgoing,current_C,nbits,reverse)
             if i-sub_length==0:
                 starting_bases = torch.full((self._H,),self._letter_to_index[self.fastforward_seq[-1]])[:,None].expand(-1,2**nbits)
             else:
@@ -160,7 +166,7 @@ class HedgesBonitoBase:
 
             init_time=time.time()
             print("Top loop init time {}".format(init_time-loop_time))
-            state_transition_scores_outgoing, temp_f_outgoing = self.forward_step(scores,base_transition_outgoing,F,starting_bases,i,nbits)
+            state_transition_scores_outgoing, temp_f_outgoing = self.forward_step(scores_gpu,base_transition_outgoing.to("cuda:0"),F,starting_bases.to("cuda:0"),i,nbits)
             forward_step_time = time.time()
             print("Step time {}".format(forward_step_time-init_time))
             #get incoming bases and scores coming in to each state so that the best one can be selected
@@ -169,9 +175,10 @@ class HedgesBonitoBase:
             value_of_max_scores= torch.argmax(state_scores,dim=1) # H-length vectror indicating location of best score
             current_scores=state_scores.gather(1,value_of_max_scores[:,None])
 
+            cpu_value_of_max_scores = value_of_max_scores.to("cpu")
             #update back trace matrices
-            BT_index[:,i-sub_length] = trellis_incoming_indexes[torch.arange(self._H),value_of_max_scores] #set the back trace index with best incoming state
-            BT_bases[:,i-sub_length] = bases[torch.arange(self._H),value_of_max_scores] #set base back trace matrix
+            BT_index[:,i-sub_length] = trellis_incoming_indexes[H_range,cpu_value_of_max_scores] #set the back trace index with best incoming state
+            BT_bases[:,i-sub_length] = bases[H_range,cpu_value_of_max_scores] #set base back trace matrix
 
             back_trace_time = time.time()
             print("BT time {}".format(back_trace_time-forward_step_time))
@@ -190,9 +197,10 @@ class HedgesBonitoBase:
             current_C=other_C
             other_C=t
             end_loop_time=time.time()
-            c_time = time.time()
-            print("C time {}".format(c_time-f_time))
+            #c_time = time.time()
+            #print("C time {}".format(c_time-f_time))
             print("End loop time {}".format(end_loop_time-forward_step_time))
+            print("Complete iteration time {}".format(time.time()-loop_time))
             
         print(current_scores)
         for x in range(current_scores.size(0)):
@@ -221,6 +229,7 @@ class HedgesBonitoCTC(HedgesBonitoBase):
     @classmethod
     def _fwd_algorithm(cls,target_scores:torch.Tensor,mask:torch.Tensor,
                        F:torch.Tensor,lower_t_range:int,upper_t_range:int)->torch.Tensor:
+        target_scores=target_scores[:,:,:,1:]
         running_alpha_index=2
         T,H,E,L=target_scores.size()
         alpha_t = torch.full((T,H,E),Log.zero)
@@ -229,21 +238,21 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         print("zeros {}".format(log_zeros.size(0)*log_zeros.size(1)))
         results_stack=torch.full((3,running_alpha.size(0),running_alpha.size(1),running_alpha.size(2)-running_alpha_index),Log.zero)
         for t in torch.arange(lower_t_range,upper_t_range):
-            loop_start_time=time.time()
             running_alpha[:,:,running_alpha_index-1] = F[t-1,:][:,None]
-            slice_time=time.time()
-            #print("slice data time {}".format(slice_time-loop_start_time))
             results_stack[0,:,:,:] = running_alpha[:,:,running_alpha_index:]
             results_stack[1,:,:,:] = running_alpha[:,:,running_alpha_index-1:-1]
-            stack_time=time.time()
-            #print("stack time {}".format(loop_start_time-stack_time))
             results_stack[2,:,:,:] = torch.where(mask,log_zeros,running_alpha[:,:,running_alpha_index-2:-2])
             running_alpha[:,:,running_alpha_index:]= Log.mul(target_scores[t,:,:,:],Log.sum(results_stack,dim=0))
-            alpha_time=time.time()
-            #print("alpha_time {}".format(alpha_time-loop_start_time))
             alpha_t[t,:,:]=running_alpha[:,:,-1]
         return alpha_t
 
+    @classmethod
+    def _dot_product(cls,target_scores,alpha_t)->torch.Tensor:
+        T,H,E,L = target_scores.size()
+        log_prob_no_transition=torch.nn.functional.pad(
+            Log.sum(torch.stack([torch.zeros((T,H,E)),target_scores[:,:,:,-1]]),dim=0), 
+            (0,0,0,0,0,1),value=Log.one)[1:,:,:] #TxHx2^nbits tensor to help with final score calculation
+        return dot(log_prob_no_transition,alpha_t[:,:,:],dim=0) #Hx2^nbits output
 
     @classmethod
     def string_to_indexes(cls,seq:str,letter_to_index:dict)->torch.Tensor:
@@ -279,6 +288,7 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         for t in torch.arange(T):
             running_alpha[2:] = Log.mul(scores_matrix[t,:],Log.sum(torch.stack([running_alpha[2:],running_alpha[1:-1],torch.where(mask,log_zeros,running_alpha[0:-2])]),dim=0))
             F[t,initial_state_index] = running_alpha[-1]
+
     def forward_step(self, scores: torch.Tensor, base_transitions: torch.Tensor, F: torch.Tensor, initial_bases:torch.Tensor, strand_index:int,
                      nbits:int) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -295,26 +305,22 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         T,A = scores.size()
         H,E = base_transitions.size()
         #need to create a Hx2^nbitsxL tensor to represent all strings we are calculating alphas for
-        targets = torch.stack([initial_bases,scores.new_zeros((H,E),dtype=torch.int64),base_transitions],dim=2)
+        targets = torch.stack([initial_bases,initial_bases.new_zeros((H,E),dtype=torch.int64),base_transitions],dim=2)
         _,_2,L = targets.size()
-        targets=targets[None,:,:,:].expand(T,-1,-1,-1) #expand the targets along the time dimension 
-        target_scores = torch.gather(scores[:,None,None,:].expand(-1,H,E,-1),3,targets) #gather in the scores for the targets
+        targets=targets[None,:,:,:].expand(T,-1,-1,-1) #expand the targets along the time dimension
+        target_scores=torch.gather(scores[:,None,None,:].expand(-1,H,E,-1),3,targets)#gather in the scores for the targets        
         mask = torch.nn.functional.pad(targets[0,:,:,2:]==targets[0,:,:,:-2],(1,0),value=1)
-        target_scores=target_scores[:,:,:,1:]
         #calculate valid ranges of t to avoid unnecessary iterations
         lower_t_range=strand_index
         upper_t_range=T-self._full_message_length+strand_index+1
         init_time=time.time()
-        print("Time to init fwd {}".format(init_time-start))
+        #print("Time to init fwd {}".format(init_time-start))
         alpha_t = self._fwd_algorithm(target_scores,mask,F,lower_t_range,upper_t_range)        
         fwd_time=time.time()
-        log_prob_no_transition=torch.nn.functional.pad(
-            Log.sum(torch.stack([torch.zeros((T,H,E)),target_scores[:,:,:,-1]]),dim=0), 
-            (0,0,0,0,0,1),value=Log.one)[1:,:,:] #TxHx2^nbits tensor to help with final score calculation
-        out_scores = dot(log_prob_no_transition,alpha_t[:,:,:],dim=0) #Hx2^nbits output
+        out_scores=self._dot_product(target_scores,alpha_t)
         score_time=time.time()
-        print("Time to calculate dot product {}".format(score_time-fwd_time))
-        return out_scores,alpha_t[:,:,:]
+        #print("Time to calculate dot product {}".format(score_time-fwd_time))
+        return out_scores,alpha_t
         
     def __init__(self, hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet) -> None:
             super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet)
@@ -338,31 +344,53 @@ class HedgesBonitoCTC(HedgesBonitoBase):
 
 
 class HedgesBonitoCTCGPU(HedgesBonitoCTC):
+    fwd_alg_kernel=cu.load_cupy_func("cuda/ctc_fwd.cu","fwd_logspace",FLOAT='float',SUM2='logsumexp2',SUM='logsumexp3',MUL='add',ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
+    dot_mul_kernel=cu.load_cupy_func("cuda/ctc_fwd.cu","dot_mul",FLOAT='float',SUM='logsumexp3',SUM2='logsumexp2',MUL='add',ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
+    dot_reduce_kernel=cu.load_cupy_func("cuda/reduce.cu","dot_reduce",FLOAT='float',REDUCE="logsumexp2",ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
+
     def __init__(self, hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet) -> None:
         super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet)
         assert torch.cuda.is_available() #make sure we have cuda for this class
-      
 
+    @classmethod
+    def _dot_product(cls,target_scores,alpha_t)->torch.Tensor:
+        #dot_begin=time.time()
+        T,H,E,L = target_scores.size()
+        z = alpha_t.new_zeros((T,H,E))
+        #print("Dot begining time {}".format(time.time()-dot_begin))
+        with cp.cuda.Device(0):
+            t_per_block = 1024//(H*E)
+            total_blocks = (T//t_per_block)+1
+            #perform multiplication of dot product
+            HedgesBonitoCTCGPU.dot_mul_kernel(grid=(total_blocks,1,1),block=(E,H,t_per_block),shared_mem = 0, args=(target_scores.data_ptr(),alpha_t.data_ptr(),z.data_ptr(),T,L))
+            #now we need to reduce along the time direction
+            stride=1
+            while True:
+                total_T_blocks = (T//2048)+1
+                HedgesBonitoCTCGPU.dot_reduce_kernel(grid=(H,E,total_T_blocks),block=(1024,1,1),shared_mem = 1024*4, args=(z.data_ptr(),z.data_ptr(),T,stride))
+                if T<2048:
+                    break
+                T=total_T_blocks
+                stride*=2048
+        return z[0,:,:]
     @classmethod
     def _fwd_algorithm(cls, target_scores: torch.Tensor,mask: torch.Tensor,
                        F: torch.Tensor, lower_t_range: int, upper_t_range: int)->torch.Tensor:
-        kernel=cu.load_cupy_func("cuda/ctc_fwd.cu","fwd_logspace",FLOAT='float',SUM='logsumexp3',MUL='add',ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
+        #kernel_init_start_time=time.time();
         T,H,E,L=target_scores.size()
-        alpha_t = torch.full((T,H,E),Log.zero)
+        L-=1
+        y = torch.full((T,H,E),Log.zero,device="cuda:0")
         #convert mask from bools to floats to avoid control flow in GPU kernel
-        mask = torch.where(mask,torch.full(mask.size(),Log.zero),torch.full(mask.size(),Log.one))
-        kernel_start_time=time.time()
-        x = target_scores.to("cuda:0")
-        y=alpha_t.to("cuda:0")
-        z=mask.to("cuda:0")
+        mask = torch.where(mask,torch.full(mask.size(),Log.zero,device="cuda:0"),torch.full(mask.size(),Log.one,device="cuda:0"))
         w=F.to("cuda:0")
+        #kernel_start_time=time.time()
+        #print("Kernel init time {}".format(kernel_start_time-kernel_init_start_time))
         with cp.cuda.Device(0):
-            kernel(grid=(1,1,1),block=(L,H,E),shared_mem=2*4*(L+2)*H*E,args=(x.data_ptr(),y.data_ptr(),
-                                                                               z.data_ptr(),w.data_ptr(),lower_t_range,
-                                                                               upper_t_range,H,E,L,T,2))                   
-        print("Kernel run time {}".format(time.time()-kernel_start_time))
-        
-        return y.to("cpu")
+            HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(1,1,1),block=(L,H,E),shared_mem=2*4*(L+2)*H*E,args=(target_scores.data_ptr(),y.data_ptr(),
+                                                                                                        mask.data_ptr(),w.data_ptr(),lower_t_range,
+                                                                                                        upper_t_range,H,E,L,T,2,1))
+        #print("Kernel run time {}".format(time.time()-kernel_start_time))
+        return y
         
 class Align:
     def __init__(self,alphabet:list) -> None:
