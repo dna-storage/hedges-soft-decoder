@@ -39,32 +39,30 @@ extern "C" __global__ void fwd_logspace(
 
 
 {
-  int bx = blockIdx.x, Lidx = threadIdx.x, Eidx = threadIdx.z, Hidx=threadIdx.y;
+  int Lidx = threadIdx.x, Eidx = threadIdx.z, Hidx=threadIdx.y+blockIdx.x*blockDim.y , blockHidx=threadIdx.y;
   int total_L = L+L_pad;
-  int HEL_stride = H*E*total_L;
+  int HEL_stride = blockDim.y*E*total_L;
   int EL_stride = E*total_L;
   extern __shared__ FLOAT smem[];
+  if(Hidx>=H) return; //get rid of dead threads
   //smem needs to be initialized to time -1 so forward algorithm can go ahead
-  if(Lidx==0) smem[(lower_t_range%2)*HEL_stride+ Hidx*EL_stride + Eidx*(total_L) + Lidx] = ZERO;
-  if(Lidx==1) smem[(lower_t_range%2)*HEL_stride+ Hidx*EL_stride + Eidx*(total_L) + Lidx] = F[(lower_t_range-1)*H+Hidx];
-  smem[(lower_t_range%2)*HEL_stride+Hidx*EL_stride+Eidx*(total_L)+(Lidx+L_pad)] = ZERO;
+  if(Lidx==0) smem[(lower_t_range%2)*HEL_stride+ blockHidx*EL_stride + Eidx*(total_L) + Lidx] = ZERO;
+  if(Lidx==1) smem[(lower_t_range%2)*HEL_stride+ blockHidx*EL_stride + Eidx*(total_L) + Lidx] = F[(lower_t_range-1)*H+Hidx];
+  smem[(lower_t_range%2)*HEL_stride+blockHidx*EL_stride+Eidx*(total_L)+(Lidx+L_pad)] = ZERO;
   __syncthreads();
   for(int t=lower_t_range; t<upper_t_range;t++){
     //perform core calculations for forward algorithm
     FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back
-    a = smem[(t%2)*HEL_stride+ Hidx*EL_stride+ Eidx*total_L+ (Lidx+L_pad)];
-    a1 = smem[(t%2)*HEL_stride+ Hidx*EL_stride+ Eidx*total_L + (Lidx+L_pad-1)];
-    a2 =  MUL(smem[(t%2)*HEL_stride + Hidx*EL_stride + Eidx*total_L+ (Lidx+L_pad-2)],mask[Hidx*E*L+Eidx*L+Lidx]);
+    a = smem[(t%2)*HEL_stride+ blockHidx*EL_stride+ Eidx*total_L+ (Lidx+L_pad)];
+    a1 = smem[(t%2)*HEL_stride+ blockHidx*EL_stride+ Eidx*total_L + (Lidx+L_pad-1)];
+    a2 =  MUL(smem[(t%2)*HEL_stride + blockHidx*EL_stride + Eidx*total_L+ (Lidx+L_pad-2)],mask[Hidx*E*L+Eidx*L+Lidx]);
     score = target_scores[t*H*E*(L+target_score_pad)+ Hidx*E*(L+target_score_pad)+ Eidx*(L+target_score_pad)+ (Lidx+target_score_pad)];
     //if(Hidx==0 && Eidx==0) printf("t %d L %d score %f \n",t,Lidx,score);
     final_score = MUL(score,SUM(a,a1,a2));
-    smem[(((t+1)%2))*HEL_stride + Hidx*EL_stride + Eidx*total_L+(Lidx+L_pad)]=final_score;
-    if(Lidx==0) smem[(((t+1)%2))*HEL_stride+ Hidx*EL_stride+ Eidx*(total_L)+ Lidx] = ZERO;
-    else
-      {
-	smem[((t+1)%2)*HEL_stride + Hidx*EL_stride + Eidx*total_L + Lidx] = F[t*H + Hidx];
-	alpha_t[ t*H*E+ Hidx*E+ Eidx] = final_score;
-      }
+    smem[(((t+1)%2))*HEL_stride + blockHidx*EL_stride + Eidx*total_L+(Lidx+L_pad)]=final_score;
+    if(Lidx==0) smem[(((t+1)%2))*HEL_stride+ blockHidx*EL_stride+ Eidx*(total_L)+ Lidx] = ZERO;
+    else if (Lidx==1) smem[((t+1)%2)*HEL_stride + blockHidx*EL_stride + Eidx*total_L + Lidx] = F[t*H + Hidx];
+    if (Lidx==L-1) alpha_t[ t*H*E+ Hidx*E+ Eidx] = final_score;
     __syncthreads();
   }
 }
