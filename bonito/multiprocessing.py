@@ -7,6 +7,7 @@ from itertools import count
 from threading import Thread
 from functools import partial
 from signal import signal, SIGINT
+import multiprocessing
 from multiprocessing import Process, Queue, Event
 
 
@@ -38,7 +39,7 @@ def process_map(func, iterator, n_proc=4, maxsize=2):
     Take an `iterator` of key, value pairs and apply `func` to all values using `n_proc` processes.
     """
     if n_proc == 0: return ((k, func(v)) for k, v in iterator)
-    return iter(ProcessMap(func, iterator, n_proc, output_queue=Queue(maxsize)))
+    return iter(ProcessMap(func, iterator, n_proc, send_key=True, output_queue=Queue(maxsize)))
 
 
 def process_itemmap(func, iterator, n_proc=4, maxsize=2):

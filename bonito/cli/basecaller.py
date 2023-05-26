@@ -19,10 +19,10 @@ from bonito.mod_util import call_mods, load_mods_model
 from bonito.cli.download import File, models, __models__
 from bonito.multiprocessing import process_cancel, process_itemmap
 from bonito.util import column_to_set, load_symbol, load_model, init
-
+import multiprocessing
 
 def main(args):
-
+    multiprocessing.set_start_method('spawn')
     init(args.seed, args.device)
 
     try:

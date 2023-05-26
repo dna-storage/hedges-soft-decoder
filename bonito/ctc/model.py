@@ -34,6 +34,8 @@ class Model(Module):
         self.encoder = Encoder(config)
         self.decoder = Decoder(self.features, len(self.alphabet))
 
+    def clean(self):
+        del self.encoder
     def forward(self, x):
         encoded = self.encoder(x)
         return self.decoder(encoded)
