@@ -99,9 +99,7 @@ class HedgesBonitoBase:
 
     def __init__(self,hedges_param_dict:dict,hedges_bytes:bytes,using_hedges_DNA_constraint:bool,alphabet:list,device) -> None:
         self._global_hedge_state_init = hedges_hooks.make_hedge( hedges.hedges_state(**hedges_param_dict)) #stores pointer to a hedges state object
-        #print("Bytes {}".format(hedges_bytes))
         self._fastforward_seq=hedges_hooks.fastforward_context(bytes(hedges_bytes),self._global_hedge_state_init) #modifies the global hedge state to reflect state at end of hedges_bytes
-        #print("Fastforward sequence {}".format(self._fastforward_seq))
         self._H = self.get_trellis_state_length(hedges_param_dict,using_hedges_DNA_constraint) #length of history side of matrices
         self._full_message_length = hedges_hooks.get_max_index(self._global_hedge_state_init) #total message length
         self._L = self._full_message_length - len(self._fastforward_seq)#length of message-length side of matrices
@@ -117,7 +115,6 @@ class HedgesBonitoBase:
         current_state=torch.tensor(start_state)
         return_sequence=""
         for i in torch.flip(torch.arange(L,dtype=torch.int64),dims=(0,)):
-            #print(current_state)
             return_sequence+=self._alphabet[int(BT_bases[current_state,i])]
             if i==0: break
             current_state=BT_index[current_state,i]
@@ -158,8 +155,6 @@ class HedgesBonitoBase:
         pattern_counter=0
         accumulate_base_transition=torch.full((self._H,2**1,3*2),0,dtype=torch.int64)
         for i in range(self._full_message_length-self._L,self._full_message_length):
-            #print(i)
-            #loop_time=time.time()
             nbits = hedges_hooks.get_nbits(self._global_hedge_state_init,i)
             base_transition_outgoing=self.fill_base_transitions(self._H,2**nbits,current_C,nbits,reverse)
             pattern_range=pattern_counter*2
@@ -180,14 +175,10 @@ class HedgesBonitoBase:
                 else:
                     starting_bases = torch.from_numpy(BT_bases[:,i-sub_length-1-(pattern_counter-1)])[:,None].expand(-1,2**nbits)
 
-                #init_time=time.time()
-                #print("Top loop init time {}".format(init_time-loop_time))
                 state_transition_scores_outgoing, temp_f_outgoing = self.forward_step(scores_gpu,
                                                                                       accumulate_base_transition[:,:2**nbits,:pattern_range+2].to(self._device),
                                                                                       F,starting_bases.to(self._device),i,nbits)
                 pattern_counter=0 #reset pattern counter
-                #forward_step_time = time.time()
-                #print("Step time {}".format(forward_step_time-init_time))
                 #get incoming bases and scores coming in to each state so that the best one can be selected
                 state_scores = state_transition_scores_outgoing[trellis_incoming_indexes,trellis_incoming_value] #should produce Hx2^n matrix of scores that need to be compared
                 bases = base_transition_outgoing[trellis_incoming_indexes,trellis_incoming_value]#Hx2^n matrix of bases to add
@@ -199,25 +190,18 @@ class HedgesBonitoBase:
                 BT_index[:,i-sub_length] = trellis_incoming_indexes[H_range,cpu_value_of_max_scores] #set the back trace index with best incoming state
                 BT_bases[:,i-sub_length] = bases[H_range,cpu_value_of_max_scores] #set base back trace matrix
 
-                #back_trace_time = time.time()
-                #print("BT time {}".format(back_trace_time-forward_step_time))
                 #update forward arrays
                 incoming_F = temp_f_outgoing[:,trellis_incoming_indexes,trellis_incoming_value]
                 F = incoming_F[:,H_range,value_of_max_scores]
-                #f_time = time.time()
-                #print("F update time {}".format(f_time-back_trace_time))
-                #c_update_time=time.time()
                 trellis_numpy=trellis_incoming_value.numpy()
                 for r in H_range:
                     state = BT_index[r,i-sub_length]
                     val = trellis_numpy[r,0]
                     hedges_hooks.update_context(other_C[r],current_C[state],nbits,val)
-                #print("update c time {}".format(time.time()-c_update_time))
             #swap contexts to make sure update happens properly
             t=current_C
             current_C=other_C
             other_C=t
-            #print("Complete iteration time {}".format(time.time()-loop_time))
 
         """
         print(current_scores)
@@ -226,7 +210,6 @@ class HedgesBonitoBase:
             print("{}:{}".format(x,current_scores[x,0]))
         """
         start_state = int(torch.argmax(current_scores))
-        #print("start state {}".format(start_state))
         out_seq = self.fastforward_seq+self.string_from_backtrace(BT_index,BT_bases,start_state)
         if reverse: out_seq=complement(out_seq)     
         return out_seq
@@ -318,12 +301,9 @@ class HedgesBonitoCTC(HedgesBonitoBase):
 
         @return     return tuple of tensors (X,Y) where X is a Hx2^nbits tensor of scores, and Y is a TxHx2^nbits tensor of outgoing alpha calculations
         """
-        #start=time.time()
         T,A = scores.size()
         H,E,L_trans = base_transitions.size()
         #need to create a Hx2^nbitsxL tensor to represent all strings we are calculating alphas for
-        #print(base_transitions.size())
-        #print(initial_bases.size())
         targets = torch.concat([initial_bases[:,:,None],base_transitions],dim=2)
         _,_2,L = targets.size()
         targets=targets[None,:,:,:].expand(T,-1,-1,-1) #expand the targets along the time dimension
@@ -332,13 +312,8 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         #calculate valid ranges of t to avoid unnecessary iterations
         lower_t_range=strand_index
         upper_t_range=T-self._full_message_length+strand_index+1
-        #init_time=time.time()
-        #print("Time to init fwd {}".format(init_time-start))
         alpha_t = self._fwd_algorithm(target_scores,mask,F,lower_t_range,upper_t_range,self._device)        
-        #fwd_time=time.time()
         out_scores=self._dot_product(target_scores,alpha_t)
-        #score_time=time.time()
-        #print("Time to calculate dot product {}".format(score_time-fwd_time))
         return out_scores,alpha_t
         
     def __init__(self, hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet,device) -> None:
@@ -373,10 +348,8 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
 
     @classmethod
     def _dot_product(cls,target_scores,alpha_t)->torch.Tensor:
-        #dot_begin=time.time()
         T,H,E,L = target_scores.size()
         z = alpha_t.new_zeros((T,H,E))
-        #print("Dot begining time {}".format(time.time()-dot_begin))
         with cp.cuda.Device(0):
             t_per_block = 1024//(H*E)
             total_blocks = (T//t_per_block)+1
@@ -398,15 +371,12 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
     @classmethod
     def _fwd_algorithm(cls, target_scores: torch.Tensor,mask: torch.Tensor,
                        F: torch.Tensor, lower_t_range: int, upper_t_range: int,device=None)->torch.Tensor:
-        #kernel_init_start_time=time.time();
         T,H,E,L=target_scores.size()
         L-=1
         y = torch.full((T,H,E),Log.zero,device=device)
         #convert mask from bools to floats to avoid control flow in GPU kernel
         mask = torch.where(mask,torch.full(mask.size(),Log.zero,device=device),torch.full(mask.size(),Log.one,device=device))
         w=F.to(device)
-        #kernel_start_time=time.time()
-        #print("Kernel init time {}".format(kernel_start_time-kernel_init_start_time))
         with cp.cuda.Device(0):
             h_divider=L//2
             h_per_block=H//h_divider
@@ -414,7 +384,6 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,1,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,args=(target_scores.data_ptr(),y.data_ptr(),
                                                                                                         mask.data_ptr(),w.data_ptr(),lower_t_range,
                                                                                                         upper_t_range,H,E,L,T,2,1))
-        #print("Kernel run time {}".format(time.time()-kernel_start_time))
         return y
         
 class Align:
