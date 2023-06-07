@@ -214,7 +214,7 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             H_blocks = (H//h_per_block)+1
             HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,1,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,args=(target_scores.data_ptr(),y.data_ptr(),
                                                                                                                                    mask.data_ptr(),w.data_ptr(),r_1,r_2,
-                                                                                                                                   upper_t_range,H,E,L,T,2,1,f_offset,F.size(0)))
+                                                                                                                                   H,E,L,T,2,1,f_offset,F.size(0)))
         return y
         
 
