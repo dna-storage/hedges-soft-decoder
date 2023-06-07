@@ -95,6 +95,14 @@ class HedgesBonitoCTC(HedgesBonitoBase):
             running_alpha[2:] = Log.mul(scores_matrix[t,:],Log.sum(torch.stack([running_alpha[2:],running_alpha[1:-1],torch.where(mask,log_zeros,running_alpha[0:-2])]),dim=0))
             F[t,initial_state_index] = running_alpha[-1]
 
+        if self._window>0:
+            scores_per_base = T/self._full_message_length
+            strand_index = len(self._fastforward_seq)-1
+            lower_t_range=int(max(((strand_index)*scores_per_base)-self._window,strand_index))
+            upper_t_range=int(min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1))
+            F=F[lower_t_range:upper_t_range,:]
+            self._current_F_lower = lower_t_range
+
     def forward_step(self, scores: torch.Tensor, base_transitions: torch.Tensor, F: torch.Tensor, initial_bases:torch.Tensor, strand_index:int,
                      nbits:int) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -113,8 +121,8 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         using_window=False
         if self._window and self._window>0:
             using_window=True
-            lower_t_range=max(((strand_index-L_trans)*scores_per_base)-self._window,strand_index-L_trans)
-            upper_t_range=min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1)
+            lower_t_range=int(max(((strand_index-L_trans)*scores_per_base)-self._window,strand_index-L_trans))
+            upper_t_range=int(min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1))
             T_range = upper_t_range-lower_t_range
             #need to create a Hx2^nbitsxL tensor to represent all strings we are calculating alphas for var in collection:
             targets = torch.concat([initial_bases[:,:,None],base_transitions],dim=2)
@@ -133,10 +141,11 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         mask = torch.nn.functional.pad(targets[0,:,:,2:]==targets[0,:,:,:-2],(1,0),value=1)
         #calculate valid ranges of t to avoid unnecessary iterations
 
-        alpha_t = self._fwd_algorithm(target_scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,scores_per_base)
+        alpha_t = self._fwd_algorithm(target_scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,lower_t_range-self._current_F_lower)
         #if PLOT and strand_index==504: plot_scores(alpha_t,lower_t_range,upper_t_range,True)
         if PLOT and strand_index==1002: plot_scores(alpha_t,int((self._T*lower_t_range/2160)-1000),int((self._T*lower_t_range/2160)+1000),True,int(self._T*lower_t_range/2160))
         out_scores=self._dot_product(target_scores,alpha_t)
+        self._current_F_lower=lower_t_range #keeps track of most recent lower_t_range
         return out_scores,alpha_t
  
         
@@ -205,7 +214,7 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             f_offset=int(-1)
         else:
             r_1 = 0
-            r_2 = upper_t_range-1
+            r_2 = upper_t_range-lower_t_range
             f_offset=pad-1
         
         with cp.cuda.Device(0):
