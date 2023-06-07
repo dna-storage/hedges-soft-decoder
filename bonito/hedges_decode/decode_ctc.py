@@ -96,7 +96,7 @@ class HedgesBonitoCTC(HedgesBonitoBase):
             F[t,initial_state_index] = running_alpha[-1]
 
     def forward_step(self, scores: torch.Tensor, base_transitions: torch.Tensor, F: torch.Tensor, initial_bases:torch.Tensor, strand_index:int,
-                     nbits:int,device=None) -> tuple[torch.Tensor, torch.Tensor]:
+                     nbits:int) -> tuple[torch.Tensor, torch.Tensor]:
         """
         @brief      Calculates a forward step in the hedges ctc algorithm
 
@@ -133,7 +133,7 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         mask = torch.nn.functional.pad(targets[0,:,:,2:]==targets[0,:,:,:-2],(1,0),value=1)
         #calculate valid ranges of t to avoid unnecessary iterations
 
-        alpha_t = self._fwd_algorithm(target_scores,mask,F,lower_t_range,upper_t_range,device,using_window,scores_per_base)
+        alpha_t = self._fwd_algorithm(target_scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,scores_per_base)
         #if PLOT and strand_index==504: plot_scores(alpha_t,lower_t_range,upper_t_range,True)
         if PLOT and strand_index==1002: plot_scores(alpha_t,int((self._T*lower_t_range/2160)-1000),int((self._T*lower_t_range/2160)+1000),True,int(self._T*lower_t_range/2160))
         out_scores=self._dot_product(target_scores,alpha_t)
