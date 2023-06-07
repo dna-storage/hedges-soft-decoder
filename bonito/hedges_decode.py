@@ -1,4 +1,5 @@
 from os import listdir
+import os
 import torch
 import math
 import numpy as np
@@ -12,10 +13,32 @@ import cupy as cp
 import gc
 import sys
 import traceback
-
-
-
 import time
+
+
+#get env variables
+PLOT = os.getenv("PLOT",False)
+
+'''
+functions for plotting some stuff related to decoding
+'''
+import matplotlib.pyplot as plt
+
+def plot_scores(scores,lower,upper,show=False,vline=0):
+    cpu_scores=scores.to("cpu")
+    T,H,E=scores.size()
+    top = min(T,upper)
+    for i in range(H):
+        for j in range(E):
+            plt.plot(range(lower,top),cpu_scores[lower:top,i,j])
+    plt.ylim(-6000,-250)
+    plt.axvline(x=vline)
+    if show: plt.show()
+    #plt.cla()
+    
+
+
+
 
 
 reverse_map={"A":"T","T":"A","C":"G","G":"C"}
@@ -119,7 +142,7 @@ class HedgesBonitoBase:
             if i==0: break
             current_state=BT_index[current_state,i]
         return return_sequence[::-1]
-    
+ 
     def decode(self,scores:torch.Tensor,reverse:bool)->str:
         """
         @brief      Core algorithm for implementing hedges viterbi decoding
@@ -129,6 +152,7 @@ class HedgesBonitoBase:
         @return     string representing basecalled strand
         """
         self._T = scores.size(0) #time dimension 
+
         #setup backtracing matricies
         BT_index = np.zeros((self._H,self._L),dtype=int)#dtype=torch_get_index_dtype(self._H)) #index backtrace matrix
         BT_bases = np.zeros((self._H,self._L),dtype=int)#dtype=torch.uint8) #base value backtrace matrix
@@ -154,7 +178,9 @@ class HedgesBonitoBase:
         H_range=torch.arange(self._H)
         pattern_counter=0
         accumulate_base_transition=torch.full((self._H,2**1,3*2),0,dtype=torch.int64)
+        print("Real Scores size {}".format(self._T))
         for i in range(self._full_message_length-self._L,self._full_message_length):
+            #print(i)
             nbits = hedges_hooks.get_nbits(self._global_hedge_state_init,i)
             base_transition_outgoing=self.fill_base_transitions(self._H,2**nbits,current_C,nbits,reverse)
             pattern_range=pattern_counter*2
@@ -202,13 +228,6 @@ class HedgesBonitoBase:
             t=current_C
             current_C=other_C
             other_C=t
-
-        """
-        print(current_scores)
-        for x in range(current_scores.size(0)):
-            print("{}:{}".format(x,self.string_from_backtrace(BT_index,BT_bases,x)))
-            print("{}:{}".format(x,current_scores[x,0]))
-        """
         start_state = int(torch.argmax(current_scores))
         out_seq = self.fastforward_seq+self.string_from_backtrace(BT_index,BT_bases,start_state)
         if reverse: out_seq=complement(out_seq)     
@@ -312,8 +331,11 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         #calculate valid ranges of t to avoid unnecessary iterations
         lower_t_range=strand_index
         upper_t_range=T-self._full_message_length+strand_index+1
-        alpha_t = self._fwd_algorithm(target_scores,mask,F,lower_t_range,upper_t_range,self._device)        
-        out_scores=self._dot_product(target_scores,alpha_t)
+        alpha_t = self._fwd_algorithm(target_scores,mask,F,lower_t_range,upper_t_range,self._device)
+        #print(np.mean(torch.argmax(alpha_t.to("cpu"),dim=0).numpy()-lower_t_range)/lower_t_range)
+        #if PLOT and strand_index==504: plot_scores(alpha_t,lower_t_range,upper_t_range,True)
+        if PLOT and strand_index==1002: plot_scores(alpha_t,int((self._T*lower_t_range/2160)-1000),int((self._T*lower_t_range/2160)+1000),True,self._T*lower_t_range/2160)
+        out_scores=self._dot_product(target_scores,alpha_t,strand_index)
         return out_scores,alpha_t
         
     def __init__(self, hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet,device) -> None:
@@ -347,7 +369,7 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
         assert torch.cuda.is_available() #make sure we have cuda for this class
 
     @classmethod
-    def _dot_product(cls,target_scores,alpha_t)->torch.Tensor:
+    def _dot_product(cls,target_scores,alpha_t,strand_index=0)->torch.Tensor:
         T,H,E,L = target_scores.size()
         z = alpha_t.new_zeros((T,H,E))
         with cp.cuda.Device(0):
@@ -355,6 +377,7 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             total_blocks = (T//t_per_block)+1
             #perform multiplication of dot product
             HedgesBonitoCTCGPU.dot_mul_kernel(grid=(total_blocks,1,1),block=(E,H,t_per_block),shared_mem = 0, args=(target_scores.data_ptr(),alpha_t.data_ptr(),z.data_ptr(),T,L))
+            #if PLOT and strand_index==1002: plot_scores(z,0,T,True) 
             #now we need to reduce along the time direction
             stride=1
             while True:
@@ -417,6 +440,7 @@ class Align:
         r = torch.arange(1,emission_scores.size(1),device=self._device)
         zeros= scores.new_full((emission_scores.size(1),),Log.zero)
         for t in torch.arange(T):
+            #print(t)
             stay = Log.mul(running_alpha[2:],emission_scores[t,:])
             previous = Log.mul(running_alpha[1:-1],emission_scores[t,:])
             previous_previous = Log.mul(torch.where(mask,zeros,running_alpha[:-2]),emission_scores[t,:])
@@ -470,6 +494,7 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
     gc.collect()
     torch.cuda.empty_cache()
     torch.cuda.synchronize()
+    start_time=time.time()
     try:
         with torch.no_grad():
             scores=scores["scores"].to("cpu")
@@ -515,7 +540,11 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                 complement_trellis=False
                 if(s.size(0)==0 or s.size(0)<decoder._full_message_length): seq="N"
                 else:
+                    decode_start_time=time.time()
+                    #print("Time up to decode {}".format(decode_start_time-start_time))
                     seq = decoder.decode(s,complement_trellis)
+                    decode_end_time=time.time()
+                    #print("Time to decode {}".format(decode_end_time-decode_start_time))
             else:
                 #print("IS REVERSE")
                 s=scores[r_hedges_bytes_lower_index:r_endpoint_lower_index]
@@ -526,8 +555,11 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                     #print("{} {}".format(r_hedges_bytes_lower_index,r_endpoint_lower_index))
                     complement_trellis=True
                     decoder.fastforward_seq = complement(decoder.fastforward_seq)
+                    decode_start_time=time.time()
+                    #print("Time up to decode {}".format(decode_start_time-start_time))
                     seq = decoder.decode(s,complement_trellis)
-
+                    decode_end_time=time.time()
+                    #print("Time to decode {}".format(decode_end_time-decode_start_time))
             #try to clean up memory
             return {'sequence':seq,'qstring':"*"*len(seq),'stride':stride,'moves':seq}
     except Exception as e:

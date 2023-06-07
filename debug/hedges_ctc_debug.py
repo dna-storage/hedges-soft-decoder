@@ -1,5 +1,4 @@
 import bonito.hedges_decode as hd
-import bonito.hedges_decode_numpy as hdnp
 
 if __name__ =="__main__":
     import pickle

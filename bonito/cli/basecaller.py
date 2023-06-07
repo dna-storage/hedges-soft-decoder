@@ -56,7 +56,8 @@ def main(args):
             overlap=args.overlap,
             batchsize=args.batchsize,
             quantize=args.quantize,
-            use_koi=(not args.disable_koi)
+            use_koi=(not args.disable_koi),
+            half=(not args.disable_half)
         )
     except FileNotFoundError:
         sys.stderr.write(f"> error: failed to load {args.model_directory}\n")
@@ -215,4 +216,5 @@ def argparser():
     parser.add_argument("--hedges_use_dna_constraint",default=False,action="store_true",help = "Include this flag to include DNA Constraint information in hedges trellis")
     parser.add_argument("--strand_pad",action="store",default="",help="Optional padding strand that will be aligned to trim score endpoints")
     parser.add_argument("--disable_koi",default=False,action="store_true",help="Use this flag when using CTC-based model to avoid errors")
+    parser.add_argument("--disable_half",action="store_true",default=False,help="Disables half precision on the model ")
     return parser
