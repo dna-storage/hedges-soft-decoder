@@ -38,7 +38,7 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         tmp_F=F
         if not using_window:
             r = torch.arange(lower_t_range,upper_t_range)
-            F_offset = -1
+            F_offset = int(-1)
         else: #this is only necesssary when we are trying to store only the time range we are calculating
             r = torch.arange(0,upper_t_range-lower_t_range)
             F_offset = pad-1
@@ -202,7 +202,7 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
         if not using_window:
             r_1 = lower_t_range
             r_2 = upper_t_range
-            f_offset=-1
+            f_offset=int(-1)
         else:
             r_1 = 0
             r_2 = upper_t_range-1
