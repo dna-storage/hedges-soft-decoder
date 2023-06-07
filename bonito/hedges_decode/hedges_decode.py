@@ -15,9 +15,9 @@ import sys
 import traceback
 import time
 
-from base_decode import *
-from decode_ctc import *
-from align import *
+from bonito.hedges_decode.base_decode import *
+from bonito.hedges_decode.decode_ctc import *
+from bonito.hedges_decode.align import *
 
 def check_hedges_params(hedges_params_dict)->None:
     """

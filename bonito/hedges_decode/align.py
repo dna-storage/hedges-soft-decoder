@@ -1,4 +1,4 @@
-from decode_ctc import * 
+from bonito.hedges_decode.decode_ctc import * 
 import torch
 
 class Align:

@@ -1,5 +1,5 @@
-from base_decode import *
-from plot import *
+from bonito.hedges_decode.base_decode import *
+from bonito.hedges_decode.plot import *
 
 import torch
 import bonito.cuda_utils as cu
