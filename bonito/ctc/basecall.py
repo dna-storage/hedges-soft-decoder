@@ -10,7 +10,7 @@ from bonito.multiprocessing import process_map
 from bonito.util import mean_qscore_from_qstring
 from bonito.util import chunk, stitch, batchify, unbatchify, permute
 
-from bonito.hedges_decode import hedges_decode
+from bonito.hedges_decode.hedges_decode import hedges_decode
 
 import pickle
 import sys
