@@ -1,8 +1,8 @@
 from bonito.hedges_decode.base_decode import *
 from bonito.hedges_decode.plot import *
+import bonito.hedges_decode.cuda_utils as cu
 
 import torch
-import bonito.cuda_utils as cu
 import dnastorage.codec.hedges_hooks as hedges_hooks
 import cupy as cp
 

@@ -5,7 +5,6 @@ import math
 import numpy as np
 import json
 import inspect
-import bonito.cuda_utils as cu
 from collections import namedtuple
 import dnastorage.codec.hedges as hedges
 import dnastorage.codec.hedges_hooks as hedges_hooks
@@ -15,6 +14,7 @@ import sys
 import traceback
 import time
 
+import bonito.hedges_decode.cuda_utils as cu
 from bonito.hedges_decode.base_decode import *
 from bonito.hedges_decode.decode_ctc import *
 from bonito.hedges_decode.align import *
