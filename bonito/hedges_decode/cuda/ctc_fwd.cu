@@ -97,7 +97,7 @@ extern "C" __global__ void fwd_logspac_align(
   if(Lidx==0 || Lidx==1) smem[Lidx] = ZERO;
   smem[Lidx+L_pad] = ZERO;
   __syncthreads();
-  for(int t=0 t<T;t++){
+  for(int t=0;t<T;t++){
     //perform core calculations for forward algorithm
     FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back
     score = target_scores[t*(L)+Lidx];
