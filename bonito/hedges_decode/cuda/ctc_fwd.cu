@@ -103,7 +103,7 @@ extern "C" __global__ void fwd_logspac_align(
     score = target_scores[t*(L)+Lidx];
     a = MUL(score,smem[(t%2)*total_L+(Lidx+L_pad)]);
     a1 = MUL(score,smem[(t%2)*total_L+(Lidx+L_pad-1)]);
-    a2 =  MUL(score,smem[(t%2)*total_L+(Lidx+L_pad-2)],mask[Lidx]);
+    a2 =  sum3(score,smem[(t%2)*total_L+(Lidx+L_pad-2)],mask[Lidx]);
     final_score = max3(a,a1,a2);
     int a_ = (a>a1 && a>a2)*0;
     int a1_ = (a1>a && a1>a2)*1;
