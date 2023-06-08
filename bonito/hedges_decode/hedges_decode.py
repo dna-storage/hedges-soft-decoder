@@ -87,10 +87,10 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
             Because we
             """
             seq=""
-            #print("hedges f score {}".format(f_hedges_score))
-            #print("endpoint f score {}".format(f_endpoint_score))
-            #print("hedges r score {}".format(r_hedges_score))
-            #print("endpoint r score {}".format(r_endpoint_score))
+            print("hedges f score {}".format(f_hedges_score))
+            print("endpoint f score {}".format(f_endpoint_score))
+            print("hedges r score {}".format(r_hedges_score))
+            print("endpoint r score {}".format(r_endpoint_score))
             if Log.mul(f_hedges_score,f_endpoint_score)>Log.mul(r_endpoint_score,r_hedges_score):
                 #print("IS FORWARD")
                 s=scores[f_endpoint_upper_index:f_hedges_bytes_upper_index]
