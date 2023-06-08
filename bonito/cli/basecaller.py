@@ -136,7 +136,7 @@ def main(args):
         hedges_using_DNA_constraint=args.hedges_use_dna_constraint,
         strand_pad=args.strand_pad,
         rna=args.rna,
-        
+        window=args.window
     )
     
     if mods_model is not None:
@@ -217,4 +217,5 @@ def argparser():
     parser.add_argument("--strand_pad",action="store",default="",help="Optional padding strand that will be aligned to trim score endpoints")
     parser.add_argument("--disable_koi",default=False,action="store_true",help="Use this flag when using CTC-based model to avoid errors")
     parser.add_argument("--disable_half",action="store_true",default=False,help="Disables half precision on the model ")
+    parser.add_argument("--window",action="store",type=int,default=0,help="window to use for ctc decoding")
     return parser

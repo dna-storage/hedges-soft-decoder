@@ -17,7 +17,8 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet,device)
         self._trellis_connections,self._trellis_transition_values = self.calculate_trellis_connections(range(0,3),self._H) #list of matrices with trellis connections for different points in the codeword
         self._window = window #indicates size of window to use
-        
+        self._current_F_lower=0 #used for windowing
+
     def get_trellis_state_length(self,hedges_param_dict,using_hedges_DNA_constraint)->int:
         return 2**hedges_param_dict["prev_bits"]
     
@@ -121,7 +122,7 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         using_window=False
         if self._window and self._window>0:
             using_window=True
-            lower_t_range=int(max(((strand_index-L_trans)*scores_per_base)-self._window,strand_index-L_trans))
+            lower_t_range=int(max(((strand_index+1-L_trans//2)*scores_per_base)-self._window,strand_index+1-L_trans//2))
             upper_t_range=int(min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1))
             T_range = upper_t_range-lower_t_range
             #need to create a Hx2^nbitsxL tensor to represent all strings we are calculating alphas for var in collection:
@@ -130,7 +131,7 @@ class HedgesBonitoCTC(HedgesBonitoBase):
             targets=targets[None,:,:,:].expand(T_range,-1,-1,-1) #expand the targets along the time dimension
             target_scores=torch.gather(scores[lower_t_range:upper_t_range,None,None,:].expand(-1,H,E,-1),3,targets)#gather in the scores for the targets    
         else: #base, no window case
-            lower_t_range=strand_index-L_trans
+            lower_t_range=strand_index+1-L_trans//2
             upper_t_range=T-self._full_message_length+strand_index+1
             #need to create a Hx2^nbitsxL tensor to represent all strings we are calculating alphas for var in collection:
             targets = torch.concat([initial_bases[:,:,None],base_transitions],dim=2)
