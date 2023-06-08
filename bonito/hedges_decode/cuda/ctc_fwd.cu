@@ -81,7 +81,7 @@ extern "C" __global__ void fwd_logspace(
 extern "C" __global__ void fwd_logspac_align(
 					    const FLOAT* __restrict__ target_scores,
 					    FLOAT* __restrict__ F,
-					    FLOAT* __restrict__ BT,
+					    int* __restrict__ BT,
 					    const FLOAT* __restrict__ mask,
 					    int T,
 					    int L,
@@ -109,7 +109,7 @@ extern "C" __global__ void fwd_logspac_align(
     int a1_ = (a1>a && a1>a2)*1;
     int a2_ = (a2>a && a2>a1)*2; 
     F[(t*L+Lidx)]=final_score;
-    if(Lidx>0) BT[t*(L-1)+Lidx-1)]=Lidx-(a_+a1_+a2_);
+    if(Lidx>0) BT[t*(L-1)+Lidx-1]=Lidx-(a_+a1_+a2_);
     smem[(((t+1)%2))*total_L+(Lidx+L_pad)]=final_score;
     if(Lidx==0 || Lidx==1) smem[(((t+1)%2))*total_L+Lidx] = ZERO;
     __syncthreads();
