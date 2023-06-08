@@ -51,7 +51,7 @@ class HedgesBonitoBase:
     def get_initial_trellis_index(self,global_hedge_state:int)->int:
         raise NotImplementedError()
 
-    def init_initial_state_F(self,scores:torch.Tensor,F:torch.Tensor)->None:
+    def init_initial_state_F(self,scores:torch.Tensor)->torch.Tensor:
         raise NotImplementedError()
 
     def forward_step(self,scores:torch.Tensor,base_transitions:torch.Tensor,F:torch.Tensor,initial_bases:torch.Tensor,strand_index:int,
@@ -133,8 +133,7 @@ class HedgesBonitoBase:
         other_C=C2
 
         #setup forward arrays
-        F = torch.full((self._T,self._H),Log.zero,dtype=torch.float32)
-        self.init_initial_state_F(scores,F) #initialize the state corresponding to the initial valid state of the trellis
+        F=self.init_initial_state_F(scores) #initialize the state corresponding to the initial valid state of the trellis
         current_scores = torch.full((self._H,),Log.zero)
         """
         Perform core algorithm.

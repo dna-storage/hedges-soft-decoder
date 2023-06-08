@@ -76,15 +76,27 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         ret_tensor[1::2]=seq
         return ret_tensor 
     
-    def init_initial_state_F(self, scores:torch.Tensor, F: torch.Tensor) -> None:
+    def init_initial_state_F(self, scores:torch.Tensor) -> torch.Tensor:
         T,I = scores.size()
-        initial_state_index = self.get_initial_trellis_index(self._global_hedge_state_init)
+        initial_state_index = self.get_initial_trellis_index(self._global_hedge_state_init)        
+
+        if self._window>0:
+            scores_per_base = T/self._full_message_length
+            strand_index = len(self._fastforward_seq)-1
+            lower_t_range=int(max(((strand_index)*scores_per_base)-self._window,strand_index))
+            upper_t_range=int(min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1))
+            self._current_F_lower = lower_t_range
+        else:
+            lower_t_range =0
+            upper_t_range = T
+        T_range = upper_t_range-lower_t_range
+        F = torch.full((T_range,self._H),Log.zero)
         #nothing to do if there is no initial strand
-        if len(self._fastforward_seq)==0: return
+        if len(self._fastforward_seq)==0: return F
         strand_indexes = HedgesBonitoCTC.string_to_indexes(self._fastforward_seq,self._letter_to_index)
         padded_strand = HedgesBonitoCTC.insert_blanks(strand_indexes)[:-1] #leave off last blank due to viterbi branch path nature
-        strand_index_matrix = padded_strand[None,:].expand(T,-1)#TxL matrix
-        scores_matrix = scores.gather(1,strand_index_matrix) #get log probabilities for each base at each time point
+        strand_index_matrix = padded_strand[None,:].expand(T_range,-1)#TxL matrix
+        scores_matrix = scores[lower_t_range:upper_t_range,:].gather(1,strand_index_matrix) #get log probabilities for each base at each time point
         _,L = scores_matrix.size()
         running_alpha = torch.full((L+2,),Log.zero) #1 dimensional tensor that tracks alpha for all characters at time t
         #need a mask matrix for repeats
@@ -92,18 +104,12 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         log_zeros = torch.full((L,),Log.zero)
         #iterate over T dimension and calcualte alphas
         running_alpha[2]=Log.one
-        for t in torch.arange(T):
+        for t in torch.arange(T_range):
             running_alpha[2:] = Log.mul(scores_matrix[t,:],Log.sum(torch.stack([running_alpha[2:],running_alpha[1:-1],torch.where(mask,log_zeros,running_alpha[0:-2])]),dim=0))
             F[t,initial_state_index] = running_alpha[-1]
+        return F
 
-        if self._window>0:
-            scores_per_base = T/self._full_message_length
-            strand_index = len(self._fastforward_seq)-1
-            lower_t_range=int(max(((strand_index)*scores_per_base)-self._window,strand_index))
-            upper_t_range=int(min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1))
-            F=F[lower_t_range:upper_t_range,:]
-            self._current_F_lower = lower_t_range
-
+            
     def forward_step(self, scores: torch.Tensor, base_transitions: torch.Tensor, F: torch.Tensor, initial_bases:torch.Tensor, strand_index:int,
                      nbits:int) -> tuple[torch.Tensor, torch.Tensor]:
         """
