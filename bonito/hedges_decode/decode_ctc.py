@@ -155,9 +155,7 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         self._current_F_lower=lower_t_range #keeps track of most recent lower_t_range
         return out_scores,alpha_t
  
-        
-            
-         
+
     def calculate_trellis_connections(self, bit_range: range, trellis_states: int) -> tuple[list[torch.Tensor], ...]:
         index_list=[]
         value_list=[]

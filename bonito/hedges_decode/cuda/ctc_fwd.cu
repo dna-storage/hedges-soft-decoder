@@ -95,7 +95,8 @@ extern "C" __global__ void fwd_logspac_align(
   int total_L = L+L_pad;
   extern __shared__ FLOAT smem[];
   if(Lidx==0 || Lidx==1) smem[Lidx] = ZERO;
-  smem[Lidx+L_pad] = ZERO;
+  if(Lidx==0) smem[Lidx+L_pad]=ONE;
+  else smem[Lidx+L_pad] = ZERO;
   __syncthreads();
   for(int t=0;t<T;t++){
     //perform core calculations for forward algorithm

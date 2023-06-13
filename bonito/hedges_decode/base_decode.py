@@ -5,6 +5,9 @@ from collections import namedtuple
 import dnastorage.codec.hedges as hedges
 import dnastorage.codec.hedges_hooks as hedges_hooks
 import math 
+from bonito.hedges_decode.context_utils import ContextManager
+import bonito.hedges_decode.context_utils as context_utils
+
 
 #get env variables
 PLOT = os.getenv("PLOT",False)
@@ -69,7 +72,7 @@ class HedgesBonitoBase:
     def fastforward_seq(self,s):
         self._fastforward_seq=s
 
-    def fill_base_transitions(self,H:int,transitions:int,C:list,nbits:int,reverse:bool)->np.ndarray:
+    def fill_base_transitions(self,H:int,transitions:int,C:ContextManager,nbits:int,reverse:bool)->np.ndarray:
         """
         @brief      Fills in base_transitions with indexes representing the characters at this point in the message
         @param      base_transitions tensor holding indexes of bases
@@ -77,18 +80,7 @@ class HedgesBonitoBase:
         @param      nbits number of bits on this transition
         @return     None
         """
-        base_transitions=np.zeros((H,transitions))
-        for i in range(H):
-            for j in range(transitions):
-                if reverse:
-                    next_base=self._letter_to_index[reverse_map[hedges_hooks.peek_context(C[i],nbits,j)]]
-
-                else:
-                    next_base=self._letter_to_index[hedges_hooks.peek_context(C[i],nbits,j)]
-                #base_transitions[i,j] = next_base
-                base_transitions[i,j] = next_base
-        return base_transitions
-
+        return context_utils.fill_base_transitions(H,transitions,C,nbits,reverse,self._letter_to_index)
 
     def __init__(self,hedges_param_dict:dict,hedges_bytes:bytes,using_hedges_DNA_constraint:bool,alphabet:list,device) -> None:
         self._global_hedge_state_init = hedges_hooks.make_hedge( hedges.hedges_state(**hedges_param_dict)) #stores pointer to a hedges state object
@@ -103,7 +95,6 @@ class HedgesBonitoBase:
         self._max_bits=1 #max number of bits per base
         self._device=device
         
-
     def string_from_backtrace(self,BT_index:np.ndarray,BT_bases:np.ndarray,start_state:int)->str:
         H,L = BT_index.shape
         current_state=torch.tensor(start_state)
@@ -127,8 +118,8 @@ class HedgesBonitoBase:
         #setup backtracing matricies
         BT_index = np.zeros((self._H,self._L),dtype=int)#dtype=torch_get_index_dtype(self._H)) #index backtrace matrix
         BT_bases = np.zeros((self._H,self._L),dtype=int)#dtype=torch.uint8) #base value backtrace matrix
-        C1 = [hedges_hooks.make_context(self._global_hedge_state_init) for _ in range(0,self._H)]
-        C2 = [hedges_hooks.make_context(self._global_hedge_state_init) for _ in range(0,self._H)]
+        C1 = ContextManager(self._H)
+        C2 = ContextManager(self._H)
         current_C=C1
         other_C=C2
 
@@ -159,9 +150,7 @@ class HedgesBonitoBase:
             if nbits==0 and i<self._full_message_length-1:
                 BT_index[:,i-sub_length] = np.arange(self._H)  #simply point to the same state
                 BT_bases[:,i-sub_length] = base_transition_outgoing[:,-1] #set base back trace matrix
-                for r in H_range:
-                    state = BT_index[r,i-sub_length]
-                    hedges_hooks.update_context(other_C[r],current_C[state],nbits,0)
+                other_C.update_context(current_C,BT_index,0,i-sub_length,nbits)
             else:
                 
                 trellis_incoming_indexes=self._trellis_connections[nbits] #Hx2^nbits matrix indicating incoming states from the previous time step
@@ -190,10 +179,7 @@ class HedgesBonitoBase:
                 incoming_F = temp_f_outgoing[:,trellis_incoming_indexes,trellis_incoming_value]
                 F = incoming_F[:,H_range,value_of_max_scores]
                 trellis_numpy=trellis_incoming_value.numpy()
-                for r in H_range:
-                    state = BT_index[r,i-sub_length]
-                    val = trellis_numpy[r,0]
-                    hedges_hooks.update_context(other_C[r],current_C[state],nbits,val)
+                other_C.update_context(current_C,BT_index,trellis_numpy,i-sub_length,nbits)
             #swap contexts to make sure update happens properly
             t=current_C
             current_C=other_C

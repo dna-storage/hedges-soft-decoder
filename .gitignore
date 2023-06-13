@@ -22,3 +22,5 @@ Untitled*.ipynb
 *.deb
 tmp/
 *.npy
+*.so
+*.o

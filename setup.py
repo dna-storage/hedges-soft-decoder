@@ -1,8 +1,8 @@
 import os
 import re
-from setuptools import setup, find_packages
+from setuptools import Extension, setup, find_packages
 from setuptools.command.install import install
-
+from Cython.Build import cythonize
 
 __pkg_name__ = 'bonito'
 require_file = 'requirements.txt'
@@ -24,6 +24,17 @@ with open('README.md', encoding='utf-8') as f:
     long_description = f.read()
 
 
+
+extensions = [
+    Extension("bonito.hedges_decode.context_utils",["bonito/hedges_decode/context_utils/context.pyx"],
+              extra_compile_args=["-O3","-std=c++11"],
+              include_dirs=[os.path.join(os.getenv("CONDA_PREFIX","/"),"include")],
+              library_dirs=[os.path.join(os.getenv("CONDA_PREFIX","/"),"lib")],
+              libraries=["hedges_hooks_c"],
+              language="c++"
+              )
+]
+
 setup(
     name=package_name,
     version=__version__,
@@ -42,5 +53,6 @@ setup(
     },
     dependency_links=[
         'https://download.pytorch.org/whl/cu113',
-    ]
+    ],
+    ext_modules=cythonize(extensions)
 )
