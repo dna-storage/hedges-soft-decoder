@@ -4,8 +4,11 @@ import numpy as np
 cimport numpy as cnp
 import cython
 from libcpp cimport bool
+from libcpp.map cimport map
+from libcpp.string cimport string
 from cpython cimport PyLong_AsVoidPtr
 ctypedef cnp.int64_t DTYPE_t
+
 
 DTYPE=np.int64
 
@@ -65,11 +68,12 @@ def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool 
     cdef void* context
     cdef char next_base
     cdef int letter_index
+    cdef map[string,int] m = letter_to_index
     for i in range(H):
         context = c._contexts[i]
         for j in range(n_edges):
             next_base = hedges_hooks_c.peek_context__c(context,nbits,j)
             if reverse: next_base=complement(next_base)
-            letter_index = letter_to_index[next_base]
-            base_transitions[i,j]=next_base
+            letter_index = m[string(1,next_base)]
+            base_transitions[i,j]=letter_index
     return base_transitions
