@@ -1,7 +1,7 @@
 
 extern "C" __global__ void gather_scores(
 					    FLOAT* __restrict__ target,
-					    const long* restrict dim0,
+					    const long* __restrict__ dim0,
 					    const long* __restrict__ dim1,
                         FLOAT* __restrict__ out,
 					    int dim0_size,
