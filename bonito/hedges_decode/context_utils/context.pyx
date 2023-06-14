@@ -4,16 +4,18 @@ import numpy as np
 cimport numpy as cnp
 import cython
 from libcpp cimport bool
-
+from cpython cimport PyLong_AsVoidPtr
 ctypedef cnp.int64_t DTYPE_t
+from cpython.ref cimport PyObject
 
 DTYPE=np.int64
 
 cdef class ContextManager:
    cdef void** _contexts
    cdef int _H
-   def __cinit__(self,int H, void* global_hedge):
+   def __cinit__(self,int H, PyObject* global_hedge_object):
         self._H=H
+        cdef void* global_hedge = PyLong_AsVoidPtr(global_hedge)
         self._contexts = <void**>malloc(sizeof(void*)*self._H)
         cdef int i
         for i in range(self._H):
