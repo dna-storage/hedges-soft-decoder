@@ -57,15 +57,19 @@ cdef complement(char c):
     elif c==(<char> 'C'): return <char> 'G'
     elif c==(<char>'G'): return <char>'C'
 
-
+'''
 cdef letter_to_index(char c):
     if c==(<char>'A'): return <int>1
     elif c==(<char>'T'): return <int>4
     elif c==(<char> 'C'): return <int> 2
     elif c==(<char>'G'): return <int>3
+'''
 
 
+from libcpp.map cimport map
 
+
+cdef map[char,int] letter_to_index 
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -76,7 +80,10 @@ def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool 
     cdef void* context
     cdef char next_base
     cdef int letter_index
-
+    letter_to_index['A']=1
+    letter_to_index['T']=4
+    letter_to_index['C']=2
+    letter_to_index['G']=3
     for i in range(H):
         context = c._contexts[i]
         for j in range(n_edges):
@@ -84,6 +91,6 @@ def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool 
             if reverse: next_base=complement(next_base)
             #this can be slow as hell, probably worth just using a static map 
             #letter_index = PyLong_AsLong(<object>PyDict_GetItem(letter_to_index,<object>Py_BuildValue("s#",<const char*>& next_base,1)))
-            letter_index = letter_to_index(next_base)
+            letter_index = letter_to_index[next_base]
             base_transitions[i,j]=letter_index
     return base_transitions
