@@ -15,7 +15,7 @@ cdef class ContextManager:
    cdef int _H
    def __cinit__(self,int H, PyObject* global_hedge_object):
         self._H=H
-        cdef void* global_hedge = PyLong_AsVoidPtr(global_hedge)
+        cdef void* global_hedge = PyLong_AsVoidPtr(global_hedge_object)
         self._contexts = <void**>malloc(sizeof(void*)*self._H)
         cdef int i
         for i in range(self._H):
