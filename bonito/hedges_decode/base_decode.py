@@ -19,8 +19,6 @@ def reverse_complement(seq:str)->str:
 def complement(seq:str)->str:
     return "".join([reverse_map[_] for _ in seq])
 
-
-
 semiring = namedtuple('semiring', ('zero', 'one', 'mul', 'sum'))                                                                                                               
                                                                                                                                                                       
 Log = semiring(zero=-1e38, one=0., mul=torch.add, sum=torch.logsumexp)                                                                                             
@@ -31,7 +29,6 @@ Max = semiring(zero=-1e38, one=0., mul=torch.add, sum=(lambda x, dim=0: torch.ma
 def dot(x, y, S=Log, dim=-1):                                                                                                                                                          
     return S.sum(S.mul(x, y), dim=dim)                                                                                                                                                 
                                    
-
 
 def torch_get_index_dtype(states)->torch.dtype:
     num_bits = int(math.ceil(math.log2(states)))

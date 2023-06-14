@@ -12,12 +12,14 @@ DTYPE=np.int64
 cdef class ContextManager:
    cdef void** _contexts
    cdef int _H
-   def __cinit__(self,int H):
-       self._contexts = <void**>malloc(sizeof(void*)*H)
-       self._H=H
+   def __cinit__(self,int H, void* global_hedge):
+        self._H=H
+        self._contexts = <void**>malloc(sizeof(void*)*self._H)
+        cdef int i
+        for i in range(self._H):
+            self._contexts[i] = hedges_hooks_c.make_context__c(global_hedge)
    def __dealloc__(self):
        free(self._contexts)
-
    @cython.boundscheck(False)
    @cython.wraparound(False)
    def update_context(self,ContextManager c1, cnp.ndarray[DTYPE_t,ndim=2] BT, cnp.ndarray[DTYPE_t,ndim=2] Vals,
