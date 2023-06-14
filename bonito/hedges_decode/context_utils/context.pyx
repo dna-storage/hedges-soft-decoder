@@ -7,6 +7,7 @@ from libcpp cimport bool
 from cpython cimport PyLong_AsVoidPtr, PyDict_GetItem, PyLong_AsLong
 from hedges_hooks_c cimport Py_BuildValue
 ctypedef cnp.int64_t DTYPE_t
+from libcpp.map cimport map
 
 
 DTYPE=np.int64
@@ -14,6 +15,8 @@ DTYPE=np.int64
 cdef class ContextManager:
    cdef void** _contexts
    cdef int _H
+   cdef map[char,int] letter_to_index 
+   cdef map[char,char] complement
    def __cinit__(self,int H, object global_hedge_object):
         self._H=H
         cdef void* global_hedge = PyLong_AsVoidPtr(global_hedge_object)
@@ -21,6 +24,18 @@ cdef class ContextManager:
         cdef int i
         for i in range(self._H):
             self._contexts[i] = hedges_hooks_c.make_context__c(global_hedge)
+            
+        self.letter_to_index[<char>'A']=<int>1
+        self.letter_to_index[<char>'T']=<int>4
+        self.letter_to_index[<char>'C']=<int>2
+        self.letter_to_index[<char>'G']=<int>3
+
+        self.letter_to_index[<char>'A']=<char>'T'
+        self.letter_to_index[<char>'T']=<char>'A'
+        self.letter_to_index[<char>'C']=<char>'G'
+        self.letter_to_index[<char>'G']=<char>'C'
+
+
    def __dealloc__(self):
        free(self._contexts)
    @cython.boundscheck(False)
@@ -50,12 +65,13 @@ cdef class ContextManager:
            hedges_hooks_c.update_context__c(self._contexts[h],c1_array[prev_state],nbits,const_value)
 
 
-
+'''
 cdef complement(char c):
     if c== (<char>'A'): return <char>'T'
     elif c==(<char>'T'): return <char>'A'
     elif c==(<char> 'C'): return <char> 'G'
     elif c==(<char>'G'): return <char>'C'
+'''
 
 '''
 cdef letter_to_index(char c):
@@ -66,10 +82,6 @@ cdef letter_to_index(char c):
 '''
 
 
-from libcpp.map cimport map
-
-
-cdef map[char,int] letter_to_index 
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -80,17 +92,13 @@ def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool 
     cdef void* context
     cdef char next_base
     cdef int letter_index
-    letter_to_index['A']=1
-    letter_to_index['T']=4
-    letter_to_index['C']=2
-    letter_to_index['G']=3
     for i in range(H):
         context = c._contexts[i]
         for j in range(n_edges):
             next_base = hedges_hooks_c.peek_context__c(context,nbits,j)
-            if reverse: next_base=complement(next_base)
+            if reverse: next_base=c.complement[next_base]
             #this can be slow as hell, probably worth just using a static map 
             #letter_index = PyLong_AsLong(<object>PyDict_GetItem(letter_to_index,<object>Py_BuildValue("s#",<const char*>& next_base,1)))
-            letter_index = letter_to_index[next_base]
+            letter_index = c.letter_to_index[next_base]
             base_transitions[i,j]=letter_index
     return base_transitions
