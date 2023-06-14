@@ -116,8 +116,8 @@ class HedgesBonitoBase:
         #setup backtracing matricies
         BT_index = np.zeros((self._H,self._L),dtype=int)#dtype=torch_get_index_dtype(self._H)) #index backtrace matrix
         BT_bases = np.zeros((self._H,self._L),dtype=int)#dtype=torch.uint8) #base value backtrace matrix
-        C1 = ContextManager(self._H)
-        C2 = ContextManager(self._H)
+        C1 = ContextManager(self._H,self._global_hedge_state_init)
+        C2 = ContextManager(self._H,self._global_hedge_state_init)
         current_C=C1
         other_C=C2
 
