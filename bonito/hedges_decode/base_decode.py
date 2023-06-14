@@ -77,7 +77,7 @@ class HedgesBonitoBase:
         @param      nbits number of bits on this transition
         @return     None
         """
-        return context_utils.fill_base_transitions(H,transitions,C,nbits,reverse,self._letter_to_index)
+        return context_utils.fill_base_transitions(H,transitions,C,nbits,reverse)
 
     def __init__(self,hedges_param_dict:dict,hedges_bytes:bytes,using_hedges_DNA_constraint:bool,alphabet:list,device) -> None:
         self._global_hedge_state_init = hedges_hooks.make_hedge( hedges.hedges_state(**hedges_param_dict)) #stores pointer to a hedges state object
