@@ -30,10 +30,10 @@ cdef class ContextManager:
         self.letter_to_index[<char>'C']=<int>2
         self.letter_to_index[<char>'G']=<int>3
 
-        self.letter_to_index[<char>'A']=<char>'T'
-        self.letter_to_index[<char>'T']=<char>'A'
-        self.letter_to_index[<char>'C']=<char>'G'
-        self.letter_to_index[<char>'G']=<char>'C'
+        self.complement[<char>'A']=<char>'T'
+        self.complement[<char>'T']=<char>'A'
+        self.complement[<char>'C']=<char>'G'
+        self.complement[<char>'G']=<char>'C'
 
 
    def __dealloc__(self):
@@ -80,7 +80,6 @@ cdef letter_to_index(char c):
     elif c==(<char> 'C'): return <int> 2
     elif c==(<char>'G'): return <int>3
 '''
-
 
 
 @cython.boundscheck(False)
