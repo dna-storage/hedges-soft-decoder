@@ -60,7 +60,9 @@ class HedgesBonitoBase:
     
     def calculate_trellis_connections(self, bit_range:range, trellis_states:int) -> tuple[list[torch.Tensor],...]:
         raise NotImplementedError()
-
+    
+    def gather_trans_scores(self, trans_scores:torch.Tensor, H_indexes:np.ndarray, E_indexes:np.ndarray)->torch.Tensor:
+         return trans_scores[H_indexes,E_indexes] #should produce Hx2^n matrix of scores that need to be compared
     @property 
     def fastforward_seq(self):
         return self._fastforward_seq
@@ -163,7 +165,7 @@ class HedgesBonitoBase:
                                                                                       F,starting_bases.to(self._device),i,nbits)
                 pattern_counter=0 #reset pattern counter
                 #get incoming bases and scores coming in to each state so that the best one can be selected
-                state_scores = state_transition_scores_outgoing[trellis_incoming_indexes,trellis_incoming_value] #should produce Hx2^n matrix of scores that need to be compared
+                state_scores = self.gather_trans_scores(state_transition_scores_outgoing,trellis_incoming_indexes,trellis_incoming_value)
                 bases = base_transition_outgoing[trellis_incoming_indexes,trellis_incoming_value]#Hx2^n matrix of bases to add
                 value_of_max_scores= torch.argmax(state_scores,dim=1) # H-length vectror indicating location of best score
                 current_scores=state_scores.gather(1,value_of_max_scores[:,None])
