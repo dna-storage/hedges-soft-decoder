@@ -61,7 +61,7 @@ class HedgesBonitoBase:
     def calculate_trellis_connections(self, bit_range:range, trellis_states:int) -> tuple[list[torch.Tensor],...]:
         raise NotImplementedError()
     
-    def gather_trans_scores(self, trans_scores:torch.Tensor, H_indexes:np.ndarray, E_indexes:np.ndarray)->torch.Tensor:
+    def gather_trans_scores(self, trans_scores:torch.Tensor, H_indexes:torch.Tensor, E_indexes:torch.Tensor)->torch.Tensor:
          return trans_scores[H_indexes,E_indexes] #should produce Hx2^n matrix of scores that need to be compared
     @property 
     def fastforward_seq(self):
