@@ -190,11 +190,10 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
         z = trans_scores.new_zeros(trans_scores.size())
         with cp.cuda.Device(0):
             HedgesBonitoCTCGPU.gather_indices_kernel(grid=(1,1,1),block=(H_indexes.size(1),H_indexes.size(0),1),
-                                              shared_mem=0,args=(trans_scores.data_ptr(),x.data_ptr(),y.data_ptr(),
+                                              shared_mem=0,args=(trans_scores.data_ptr(),x.data_ptr(),y.data_ptr(),z.data_ptr(),
                                                                 x.size(0),x.size(1),trans_scores.size(0),trans_scores.size(1)))
 
-        return trans_scores[H_indexes,E_indexes] #should produce Hx2^n matrix of scores that need to be compared
-
+        return z
 
     @classmethod
     def _dot_product(cls,target_scores,alpha_t,strand_index=0)->torch.Tensor:
