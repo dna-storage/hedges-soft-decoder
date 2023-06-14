@@ -104,7 +104,8 @@ class HedgesBonitoBase:
             if i==0: break
             current_state=BT_index[current_state,i]
         return return_sequence[::-1]
- 
+
+    @profile
     def decode(self,scores:torch.Tensor,reverse:bool)->str:
         """
         @brief      Core algorithm for implementing hedges viterbi decoding
@@ -139,7 +140,7 @@ class HedgesBonitoBase:
         H_range=torch.arange(self._H)
         pattern_counter=0
         accumulate_base_transition=torch.full((self._H,2**1,3*2),0,dtype=torch.int64)
-        print("Real Scores size {}".format(self._T))
+        #print("Real Scores size {}".format(self._T))
         for i in range(self._full_message_length-self._L,self._full_message_length):
             #print(i)
             nbits = hedges_hooks.get_nbits(self._global_hedge_state_init,i)

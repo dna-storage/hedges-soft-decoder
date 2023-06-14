@@ -33,7 +33,7 @@ def check_hedges_params(hedges_params_dict)->None:
         
 
 
-#@profile
+@profile
 def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                   using_hedges_DNA_constraint:bool,alphabet:list,stride=1,
                   endpoint_seq:str="",window=0)->dict:
@@ -50,9 +50,9 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
 
         @return     Dictionary with entries related to the output seqeunce
     """
-    gc.collect()
-    torch.cuda.empty_cache()
-    torch.cuda.synchronize()
+    #gc.collect()
+    #torch.cuda.empty_cache()
+    #torch.cuda.synchronize()
     start_time=time.time()
     try:
         with torch.no_grad():
@@ -69,7 +69,7 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
 
             decoder = HedgesBonitoCTCGPU(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet,"cuda:0",window=window)
             #create aligner
-            aligner = AlignCTC(alphabet,device="cpu")
+            aligner = AlignCTCGPU(alphabet,device="cuda:0")
 
             f_endpoint_upper_index=0
             r_endpoint_lower_index=len(scores)
@@ -87,10 +87,10 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
             Because we
             """
             seq=""
-            print("hedges f score {}".format(f_hedges_score))
-            print("endpoint f score {}".format(f_endpoint_score))
-            print("hedges r score {}".format(r_hedges_score))
-            print("endpoint r score {}".format(r_endpoint_score))
+            #print("hedges f score {}".format(f_hedges_score))
+            #print("endpoint f score {}".format(f_endpoint_score))
+            #print("hedges r score {}".format(r_hedges_score))
+            #print("endpoint r score {}".format(r_endpoint_score))
             if Log.mul(f_hedges_score,f_endpoint_score)>Log.mul(r_endpoint_score,r_hedges_score):
                 #print("IS FORWARD")
                 s=scores[f_endpoint_upper_index:f_hedges_bytes_upper_index]
