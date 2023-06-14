@@ -185,8 +185,8 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
 
 
     def gather_trans_scores(self, trans_scores:torch.Tensor, H_indexes:torch.Tensor, E_indexes:torch.Tensor)->torch.Tensor:
-        x = torch.to(self._device)
-        y = torch.to(self._device)
+        x = H_indexes.to(self._device)
+        y = E_indexes.to(self._device)
         z = trans_scores.new_zeros(trans_scores.size())
         with cp.cuda.Device(0):
             HedgesBonitoCTCGPU.gather_indices_kernel(grid=(1,1,1),block=(H_indexes.size(1),H_indexes.size(0),1),
