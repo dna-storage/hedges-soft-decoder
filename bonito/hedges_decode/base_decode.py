@@ -148,7 +148,7 @@ class HedgesBonitoBase:
             if nbits==0 and i<self._full_message_length-1:
                 BT_index[:,i-sub_length] = np.arange(self._H)  #simply point to the same state
                 BT_bases[:,i-sub_length] = base_transition_outgoing[:,-1] #set base back trace matrix
-                other_C.update_context(current_C,BT_index,0,i-sub_length,nbits)
+                other_C.const_update_context(current_C,BT_index,0,i-sub_length,nbits)
             else:
                 
                 trellis_incoming_indexes=self._trellis_connections[nbits] #Hx2^nbits matrix indicating incoming states from the previous time step
