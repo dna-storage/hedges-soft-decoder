@@ -4,9 +4,7 @@ import numpy as np
 cimport numpy as cnp
 import cython
 from libcpp cimport bool
-from libcpp.map cimport map
-from libcpp.string cimport string
-from cpython cimport PyLong_AsVoidPtr
+from cpython cimport PyLong_AsVoidPtr, PyDict_GetItemString, PyLong_AsLong
 ctypedef cnp.int64_t DTYPE_t
 
 
@@ -61,19 +59,19 @@ cdef complement(char c):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool reverse,
-                          dict letter_to_index):
+                          object letter_to_index):
     cdef cnp.ndarray[DTYPE_t,ndim=2] base_transitions = np.zeros([H, n_edges], dtype=DTYPE)
     cdef int i
     cdef int j
     cdef void* context
     cdef char next_base
     cdef int letter_index
-    cdef map[string,int] m = letter_to_index
     for i in range(H):
         context = c._contexts[i]
         for j in range(n_edges):
             next_base = hedges_hooks_c.peek_context__c(context,nbits,j)
             if reverse: next_base=complement(next_base)
-            letter_index = m[string(1,next_base)]
+            letter_index = PyLong_AsLong(<object>PyDict_GetItemString(letter_index,<const char*>&next_base))
             base_transitions[i,j]=letter_index
+            print(letter_index)
     return base_transitions
