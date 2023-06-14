@@ -4,7 +4,8 @@ import numpy as np
 cimport numpy as cnp
 import cython
 from libcpp cimport bool
-from cpython cimport PyLong_AsVoidPtr, PyDict_GetItemString, PyLong_AsLong, Py_BuildValue
+from cpython cimport PyLong_AsVoidPtr, PyDict_GetItem, PyLong_AsLong
+from hedges_hooks_c cimport Py_BuildValue
 ctypedef cnp.int64_t DTYPE_t
 
 
@@ -66,12 +67,13 @@ def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool 
     cdef void* context
     cdef char next_base
     cdef int letter_index
+
     for i in range(H):
         context = c._contexts[i]
         for j in range(n_edges):
             next_base = hedges_hooks_c.peek_context__c(context,nbits,j)
             if reverse: next_base=complement(next_base)
-            letter_index = PyLong_AsLong(<object>PyDict_GetItemString(letter_to_index, Py_BuildValue("s#",<const char*>&next_base,1)))
+            letter_index = PyLong_AsLong(<object>PyDict_GetItem(letter_to_index,<object>Py_BuildValue("s#",<const char*>& next_base,1)))
             base_transitions[i,j]=letter_index
             print(letter_index)
     return base_transitions

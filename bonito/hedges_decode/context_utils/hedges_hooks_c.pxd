@@ -8,3 +8,6 @@ cdef extern from "hedges_hooks_c.h":
     void* make_hedge__c(PyObject* h)
 
     void* make_context__c(void* h1)
+
+cdef extern from "Python.h":
+    PyObject* Py_BuildValue(const char* format, ... )
