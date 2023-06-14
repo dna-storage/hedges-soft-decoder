@@ -71,7 +71,7 @@ def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool 
         for j in range(n_edges):
             next_base = hedges_hooks_c.peek_context__c(context,nbits,j)
             if reverse: next_base=complement(next_base)
-            letter_index = PyLong_AsLong(<object>PyDict_GetItemString(letter_index,<const char*>&next_base))
+            letter_index = PyLong_AsLong(<object>PyDict_GetItemString(letter_to_index,<const char*>&next_base))
             base_transitions[i,j]=letter_index
             print(letter_index)
     return base_transitions
