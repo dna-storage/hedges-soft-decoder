@@ -86,5 +86,4 @@ def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool 
             #letter_index = PyLong_AsLong(<object>PyDict_GetItem(letter_to_index,<object>Py_BuildValue("s#",<const char*>& next_base,1)))
             letter_index = letter_to_index(next_base)
             base_transitions[i,j]=letter_index
-            print(letter_index)
     return base_transitions
