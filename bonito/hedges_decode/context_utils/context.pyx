@@ -69,8 +69,7 @@ cdef letter_to_index(char c):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool reverse,
-                          object letter_to_index):
+def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool reverse):
     cdef cnp.ndarray[DTYPE_t,ndim=2] base_transitions = np.zeros([H, n_edges], dtype=DTYPE)
     cdef int i
     cdef int j
