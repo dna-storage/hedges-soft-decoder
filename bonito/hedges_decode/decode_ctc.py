@@ -128,7 +128,7 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         using_window=False
         if self._window and self._window>0:
             using_window=True
-            scores_per_base=torch.argmax(F[:,0,0],dim=0)+self._current_F_lower
+            scores_per_base=torch.argmax(F[:,0],dim=0)+self._current_F_lower
             lower_t_range=int(max(((strand_index+1-L_trans//2)*scores_per_base)-self._window,strand_index+1-L_trans//2))
             upper_t_range=int(min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1))
             T_range = upper_t_range-lower_t_range
