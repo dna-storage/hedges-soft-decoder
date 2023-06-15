@@ -129,8 +129,10 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         if self._window and self._window>0:
             using_window=True
             scores_per_base=torch.argmax(F[:,0],dim=0)+self._current_F_lower
-            lower_t_range=int(max(((strand_index+1-L_trans//2)*scores_per_base)-self._window,strand_index+1-L_trans//2))
-            upper_t_range=int(min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1))
+            #lower_t_range=int(max(((strand_index+1-L_trans//2)*scores_per_base)-self._window,strand_index+1-L_trans//2))
+            #upper_t_range=int(min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1))
+            lower_t_range=int(max((scores_per_base)-self._window,strand_index+1-L_trans//2))
+            upper_t_range=int(min(scores_per_base+self._window,T-self._full_message_length+strand_index+1))
             T_range = upper_t_range-lower_t_range
             #need to create a Hx2^nbitsxL tensor to represent all strings we are calculating alphas for var in collection:
             targets = torch.concat([initial_bases[:,:,None],base_transitions],dim=2)
