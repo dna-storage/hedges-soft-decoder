@@ -80,7 +80,7 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         T,I = scores.size()
         initial_state_index = self.get_initial_trellis_index(self._global_hedge_state_init)        
 
-        if self._window>0:
+        if self._window>0 and False:
             scores_per_base = T/self._full_message_length
             strand_index = len(self._fastforward_seq)-1
             lower_t_range=int(max(((strand_index)*scores_per_base)-self._window,strand_index))
@@ -128,6 +128,7 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         using_window=False
         if self._window and self._window>0:
             using_window=True
+            scores_per_base=torch.argmax(F[:,0,0],dim=0)+self._current_F_lower
             lower_t_range=int(max(((strand_index+1-L_trans//2)*scores_per_base)-self._window,strand_index+1-L_trans//2))
             upper_t_range=int(min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1))
             T_range = upper_t_range-lower_t_range
@@ -177,23 +178,9 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
     fwd_alg_kernel=cu.load_cupy_func("cuda/ctc_fwd.cu","fwd_logspace",FLOAT='float',SUM2='logsumexp2',SUM='logsumexp3',MUL='add',ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
     dot_mul_kernel=cu.load_cupy_func("cuda/ctc_fwd.cu","dot_mul",FLOAT='float',SUM='logsumexp3',SUM2='logsumexp2',MUL='add',ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
     dot_reduce_kernel=cu.load_cupy_func("cuda/reduce.cu","dot_reduce",FLOAT='float',REDUCE="logsumexp2",ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
-    gather_indices_kernel = cu.load_cupy_func("cuda/index_gather.cu","gather_scores",FLOAT='float')
     def __init__(self, hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet,device,window=0) -> None:
         super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet,device,window)
         assert torch.cuda.is_available() #make sure we have cuda for this class
-
-
-
-    def gather_trans_scores(self, trans_scores:torch.Tensor, H_indexes:torch.Tensor, E_indexes:torch.Tensor)->torch.Tensor:
-        x = H_indexes.to(self._device)
-        y = E_indexes.to(self._device)
-        z = trans_scores.new_zeros(H_indexes.size())
-        with cp.cuda.Device(0):
-            HedgesBonitoCTCGPU.gather_indices_kernel(grid=(1,1,1),block=(H_indexes.size(1),H_indexes.size(0),1),
-                                              shared_mem=0,args=(trans_scores.data_ptr(),x.data_ptr(),y.data_ptr(),z.data_ptr(),
-                                                                x.size(0),x.size(1),trans_scores.size(0),trans_scores.size(1)))
-        return z
-
     @classmethod
     def _dot_product(cls,target_scores,alpha_t,strand_index=0)->torch.Tensor:
         T,H,E,L = target_scores.size()
