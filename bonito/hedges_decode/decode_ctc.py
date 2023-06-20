@@ -1,29 +1,42 @@
-from bonito.hedges_decode.base_decode import *
-from bonito.hedges_decode.plot import *
+from .plot import *
 import bonito.hedges_decode.cuda_utils as cu
+from .hedges_decode_utils import *
 
 import torch
 import dnastorage.codec.hedges_hooks as hedges_hooks
 import cupy as cp
+import os
+
+#get env variables
+PLOT = os.getenv("PLOT",False)
+
+class HedgesBonitoScoreBase:
+    def init_initial_state_F(self,scores:torch.Tensor)->torch.Tensor:
+        raise NotImplementedError()
+
+    def forward_step(self,scores:torch.Tensor,base_transitions:torch.Tensor,F:torch.Tensor,initial_bases:torch.Tensor,strand_index:int,
+                     nbits:int)->tuple[torch.Tensor,torch.Tensor]:
+        raise NotImplementedError()
+    def __init__(self,full_message_length:int,H:int,fastforward_seq:str,device:str,initial_state_index:int,letter_to_index:dict) -> None:
+        self._full_message_length = full_message_length
+        self._H = H
+        self._fastforward_seq=fastforward_seq
+        self._device =device
+        self._initial_state_index = initial_state_index
+        self._letter_to_index=letter_to_index
 
 
-class HedgesBonitoCTC(HedgesBonitoBase):
+
+class HedgesBonitoCTC(HedgesBonitoScoreBase):
     """
     @brief      Hedges decoding on Bonito CTC output
 
     @details    Implements the necessary methods to extract information out of Bonito scores when using the Bonito CTC model
     """
-    def __init__(self, hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet,device,window=0) -> None:
-        super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet,device)
-        self._trellis_connections,self._trellis_transition_values = self.calculate_trellis_connections(range(0,3),self._H) #list of matrices with trellis connections for different points in the codeword
+    def __init__(self, full_message_length: int, H: int, fastforward_seq: str, device: str, initial_state_index: int, letter_to_index: dict) -> None:
+        super().__init__(full_message_length, H, fastforward_seq, device, initial_state_index, letter_to_index)
         self._window = window #indicates size of window to use
         self._current_F_lower=0 #used for windowing
-
-    def get_trellis_state_length(self,hedges_param_dict,using_hedges_DNA_constraint)->int:
-        return 2**hedges_param_dict["prev_bits"]
-    
-    def get_initial_trellis_index(self,global_hedge_state)->int:
-        return 0
 
     @classmethod
     def _fwd_algorithm(cls,target_scores:torch.Tensor,mask:torch.Tensor,
@@ -78,9 +91,8 @@ class HedgesBonitoCTC(HedgesBonitoBase):
     
     def init_initial_state_F(self, scores:torch.Tensor) -> torch.Tensor:
         T,I = scores.size()
-        initial_state_index = self.get_initial_trellis_index(self._global_hedge_state_init)        
 
-        if self._window>0 and False:
+        if self._window>0:
             scores_per_base = T/self._full_message_length
             strand_index = len(self._fastforward_seq)-1
             lower_t_range=int(max(((strand_index)*scores_per_base)-self._window,strand_index))
@@ -106,7 +118,7 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         running_alpha[2]=Log.one
         for t in torch.arange(T_range):
             running_alpha[2:] = Log.mul(scores_matrix[t,:],Log.sum(torch.stack([running_alpha[2:],running_alpha[1:-1],torch.where(mask,log_zeros,running_alpha[0:-2])]),dim=0))
-            F[t,initial_state_index] = running_alpha[-1]
+            F[t,self._initial_state_index] = running_alpha[-1]
         return F
 
             
@@ -123,15 +135,12 @@ class HedgesBonitoCTC(HedgesBonitoBase):
         @return     return tuple of tensors (X,Y) where X is a Hx2^nbits tensor of scores, and Y is a TxHx2^nbits tensor of outgoing alpha calculations
         """
         T,A = scores.size()
-        scores_per_base = T/self._full_message_length
         H,E,L_trans = base_transitions.size()
         using_window=False
         if self._window and self._window>0:
             using_window=True
             scores_per_base=torch.argmax(F[:,0],dim=0)+self._current_F_lower
-            #lower_t_range=int(max(((strand_index+1-L_trans//2)*scores_per_base)-self._window,strand_index+1-L_trans//2))
-            #upper_t_range=int(min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1))
-            lower_t_range=int(max((scores_per_base)-self._window,strand_index+1-L_trans//2))
+            lower_t_range=int(max((scores_per_base)-self._window,strand_index+1-L_trans//2,self._current_F_lower+1))
             upper_t_range=int(min(scores_per_base+self._window,T-self._full_message_length+strand_index+1))
             T_range = upper_t_range-lower_t_range
             #need to create a Hx2^nbitsxL tensor to represent all strings we are calculating alphas for var in collection:
@@ -153,36 +162,22 @@ class HedgesBonitoCTC(HedgesBonitoBase):
 
         alpha_t = self._fwd_algorithm(target_scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,lower_t_range-self._current_F_lower)
         #if PLOT and strand_index==504: plot_scores(alpha_t,lower_t_range,upper_t_range,True)
-        if PLOT and strand_index==1002: plot_scores(alpha_t,int((self._T*lower_t_range/2160)-1000),int((self._T*lower_t_range/2160)+1000),True,int(self._T*lower_t_range/2160))
+        if PLOT and strand_index==1002: plot_scores(alpha_t,int((T*lower_t_range/2160)-1000),int((T*lower_t_range/2160)+1000),True,int(T*lower_t_range/2160))
         out_scores=self._dot_product(target_scores,alpha_t)
         self._current_F_lower=lower_t_range #keeps track of most recent lower_t_range
         return out_scores,alpha_t
- 
-
-    def calculate_trellis_connections(self, bit_range: range, trellis_states: int) -> tuple[list[torch.Tensor], ...]:
-        index_list=[]
-        value_list=[]
-        dtype = torch_get_index_dtype(trellis_states)
-        for nbits in bit_range:
-            incoming_states_matrix=torch.full((trellis_states,2**nbits),0,dtype=torch.int64)
-            incoming_state_value_matrix=torch.full((trellis_states,2**nbits),0,dtype=torch.int64)
-            for h in range(trellis_states):
-                value,incoming_states = hedges_hooks.get_incoming_states(self._global_hedge_state_init,nbits,h)
-                for prev_index,s_in in incoming_states:
-                    incoming_states_matrix[h,prev_index]=s_in
-                    incoming_state_value_matrix[h,prev_index]=value
-            index_list.append(incoming_states_matrix)
-            value_list.append(incoming_state_value_matrix)
-        return index_list,value_list
 
 
 class HedgesBonitoCTCGPU(HedgesBonitoCTC):
     fwd_alg_kernel=cu.load_cupy_func("cuda/ctc_fwd.cu","fwd_logspace",FLOAT='float',SUM2='logsumexp2',SUM='logsumexp3',MUL='add',ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
     dot_mul_kernel=cu.load_cupy_func("cuda/ctc_fwd.cu","dot_mul",FLOAT='float',SUM='logsumexp3',SUM2='logsumexp2',MUL='add',ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
     dot_reduce_kernel=cu.load_cupy_func("cuda/reduce.cu","dot_reduce",FLOAT='float',REDUCE="logsumexp2",ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
-    def __init__(self, hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet,device,window=0) -> None:
-        super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint,alphabet,device,window)
+   
+
+    def __init__(self, full_message_length: int, H: int, fastforward_seq: str, device: str, initial_state_index: int, letter_to_index: dict) -> None:
+        super().__init__(full_message_length, H, fastforward_seq, device, initial_state_index, letter_to_index)
         assert torch.cuda.is_available() #make sure we have cuda for this class
+
     @classmethod
     def _dot_product(cls,target_scores,alpha_t,strand_index=0)->torch.Tensor:
         T,H,E,L = target_scores.size()
@@ -204,6 +199,7 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
                 T=total_T_blocks
                 stride*=2048
         return z[0,:,:]
+    
     @classmethod
     def _fwd_algorithm(cls, target_scores: torch.Tensor,mask: torch.Tensor,
                        F: torch.Tensor, lower_t_range: int, upper_t_range: int,device,
@@ -232,4 +228,6 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
                                                                                                                                    H,E,L,T,2,1,f_offset,F.size(0)))
         return y
         
+    
+
 

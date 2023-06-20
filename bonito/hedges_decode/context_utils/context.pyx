@@ -1,14 +1,13 @@
 from libc.stdlib cimport malloc, free
 cimport hedges_hooks_c
+from hedges_hooks_c cimport mod_struct_t
 import numpy as np
 cimport numpy as cnp
 import cython
 from libcpp cimport bool
 from cpython cimport PyLong_AsVoidPtr, PyDict_GetItem, PyLong_AsLong
-from hedges_hooks_c cimport Py_BuildValue
 ctypedef cnp.int64_t DTYPE_t
 from libcpp.map cimport map
-
 
 DTYPE=np.int64
 
@@ -34,8 +33,6 @@ cdef class ContextManager:
         self.complement[<char>'T']=<char>'A'
         self.complement[<char>'C']=<char>'G'
         self.complement[<char>'G']=<char>'C'
-
-
    def __dealloc__(self):
        free(self._contexts)
    @cython.boundscheck(False)
@@ -64,24 +61,6 @@ cdef class ContextManager:
            prev_state = BT[h,update_index]
            hedges_hooks_c.update_context__c(self._contexts[h],c1_array[prev_state],nbits,const_value)
 
-
-'''
-cdef complement(char c):
-    if c== (<char>'A'): return <char>'T'
-    elif c==(<char>'T'): return <char>'A'
-    elif c==(<char> 'C'): return <char> 'G'
-    elif c==(<char>'G'): return <char>'C'
-'''
-
-'''
-cdef letter_to_index(char c):
-    if c==(<char>'A'): return <int>1
-    elif c==(<char>'T'): return <int>4
-    elif c==(<char> 'C'): return <int> 2
-    elif c==(<char>'G'): return <int>3
-'''
-
-
 @cython.boundscheck(False)
 @cython.wraparound(False)
 def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool reverse):
@@ -96,8 +75,36 @@ def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool 
         for j in range(n_edges):
             next_base = hedges_hooks_c.peek_context__c(context,nbits,j)
             if reverse: next_base=c.complement[next_base]
-            #this can be slow as hell, probably worth just using a static map 
-            #letter_index = PyLong_AsLong(<object>PyDict_GetItem(letter_to_index,<object>Py_BuildValue("s#",<const char*>& next_base,1)))
             letter_index = c.letter_to_index[next_base]
             base_transitions[i,j]=letter_index
     return base_transitions
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def mod_mask_states(ContextManager c,int nbits, int num_mods):
+    cdef cnp.ndarray[DTYPE_t,ndim=2] mod_mask= np.zeros([c._H, (1<<nbits)*num_mods], dtype=np.int32_t )
+    cdef int i
+    cdef int j
+    cdef void* context
+    cdef mod_struct_t mods
+    cdef int value_to_next_state
+    cdef int next_state
+    cdef int current_mod_index   
+    cdef int* next_states_buffer
+    cdef int* next_mods_buffer
+    next_states_buffer= <int*>malloc(sizeof(void*)*(1<<nbits))
+    next_mods_buffer= <int*>malloc(sizeof(void*)*(1<<nbits))
+
+    for i in range(c._H):
+        context = c._contexts[i]
+        current_mod_index = i%num_mods
+        mods=hedges_hooks_c.get_valid_mods(context,nbits,next_states_buffer,next_mods_buffer)
+        value_to_next_state = mods.val_to_next
+        for j in range(mods.num_valid_mods):
+            next_state = mods.next_states[j]*num_mods+mods.next_mods[j]
+            mod_mask[next_state,value_to_next_state*num_mods+current_mod_index] = 1
+    free(next_states_buffer)
+    free(next_mods_buffer)
+    return mod_mask
+
+

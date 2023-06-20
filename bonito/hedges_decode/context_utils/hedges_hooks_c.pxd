@@ -9,5 +9,11 @@ cdef extern from "hedges_hooks_c.h":
 
     void* make_context__c(void* h1)
 
-cdef extern from "Python.h":
-    PyObject* Py_BuildValue(const char* format, ... )
+    struct mod_struct:
+        int* next_states
+        int* next_mods
+        int val_to_next
+        int num_valid_mods
+    ctypedef mod_struct mod_struct_t
+
+    mod_struct_t get_valid_mods(void*c, int nbits, int* next_states_buffer, int* next_mods_buffer)

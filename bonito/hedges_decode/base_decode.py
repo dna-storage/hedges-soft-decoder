@@ -1,34 +1,14 @@
 import os
 import torch
 import numpy as np
-from collections import namedtuple
 import dnastorage.codec.hedges as hedges
 import dnastorage.codec.hedges_hooks as hedges_hooks
 import math 
 from bonito.hedges_decode.context_utils import ContextManager
 import bonito.hedges_decode.context_utils as context_utils
+from .decode_ctc import *
+from .hedges_decode_utils import *
 
-
-#get env variables
-PLOT = os.getenv("PLOT",False)
-
-reverse_map={"A":"T","T":"A","C":"G","G":"C"}
-def reverse_complement(seq:str)->str:
-    return "".join([reverse_map[_] for _ in seq[::-1]])
-
-def complement(seq:str)->str:
-    return "".join([reverse_map[_] for _ in seq])
-
-semiring = namedtuple('semiring', ('zero', 'one', 'mul', 'sum'))                                                                                                               
-                                                                                                                                                                      
-Log = semiring(zero=-1e38, one=0., mul=torch.add, sum=torch.logsumexp)                                                                                             
-
-Max = semiring(zero=-1e38, one=0., mul=torch.add, sum=(lambda x, dim=0: torch.max(x, dim=dim)))                                                                      
-
-                                                                                                                                                    
-def dot(x, y, S=Log, dim=-1):                                                                                                                                                          
-    return S.sum(S.mul(x, y), dim=dim)                                                                                                                                                 
-                                   
 
 def torch_get_index_dtype(states)->torch.dtype:
     num_bits = int(math.ceil(math.log2(states)))
@@ -45,24 +25,35 @@ class HedgesBonitoBase:
 
     @details    Base class for decoding CTC-type outputs of models used for basecalling nanopore signals, provides general functionality of implementing a CTC-based branch metric
     """
-    def get_trellis_state_length(self,hedges_param_dict:dict,using_hedges_DNA_cosntraints:bool)->int:
-        raise NotImplementedError()
-
-    def get_initial_trellis_index(self,global_hedge_state:int)->int:
-        raise NotImplementedError()
-
-    def init_initial_state_F(self,scores:torch.Tensor)->torch.Tensor:
-        raise NotImplementedError()
-
-    def forward_step(self,scores:torch.Tensor,base_transitions:torch.Tensor,F:torch.Tensor,initial_bases:torch.Tensor,strand_index:int,
-                     nbits:int)->tuple[torch.Tensor,torch.Tensor]:
-        raise NotImplementedError()
     
-    def calculate_trellis_connections(self, bit_range:range, trellis_states:int) -> tuple[list[torch.Tensor],...]:
-        raise NotImplementedError()
+    def get_trellis_state_length(self,hedges_param_dict,using_hedges_DNA_constraint)->int:
+        return 2**hedges_param_dict["prev_bits"]
+    
+    def get_initial_trellis_index(self,global_hedge_state)->int:
+        return 0
+    
+    def calculate_trellis_connections_mask(self,context:ContextManager)->torch.Tensor|None:
+        return None #for a basic trellis, not using masks
+
+    def calculate_trellis_connections(self, bit_range: range, trellis_states: int) -> tuple[list[torch.Tensor], ...]:
+        index_list=[]
+        value_list=[]
+        dtype = torch_get_index_dtype(trellis_states)
+        for nbits in bit_range:
+            incoming_states_matrix=torch.full((trellis_states,2**nbits),0,dtype=torch.int64)
+            incoming_state_value_matrix=torch.full((trellis_states,2**nbits),0,dtype=torch.int64)
+            for h in range(trellis_states):
+                value,incoming_states = hedges_hooks.get_incoming_states(self._global_hedge_state_init,nbits,h)
+                for prev_index,s_in in incoming_states:
+                    incoming_states_matrix[h,prev_index]=s_in
+                    incoming_state_value_matrix[h,prev_index]=value
+            index_list.append(incoming_states_matrix)
+            value_list.append(incoming_state_value_matrix)
+        return index_list,value_list
     
     def gather_trans_scores(self, trans_scores:torch.Tensor, H_indexes:torch.Tensor, E_indexes:torch.Tensor)->torch.Tensor:
          return trans_scores[H_indexes,E_indexes] #should produce Hx2^n matrix of scores that need to be compared
+    
     @property 
     def fastforward_seq(self):
         return self._fastforward_seq
@@ -81,10 +72,13 @@ class HedgesBonitoBase:
         """
         return context_utils.fill_base_transitions(H,transitions,C,nbits,reverse)
 
-    def __init__(self,hedges_param_dict:dict,hedges_bytes:bytes,using_hedges_DNA_constraint:bool,alphabet:list,device) -> None:
+    def __init__(self,hedges_param_dict:dict,hedges_bytes:bytes,using_hedges_DNA_constraint:bool,alphabet:list,device:str,
+                 score:str) -> None:
+        
         self._global_hedge_state_init = hedges_hooks.make_hedge( hedges.hedges_state(**hedges_param_dict)) #stores pointer to a hedges state object
         self._fastforward_seq=hedges_hooks.fastforward_context(bytes(hedges_bytes),self._global_hedge_state_init) #modifies the global hedge state to reflect state at end of hedges_bytes
         self._H = self.get_trellis_state_length(hedges_param_dict,using_hedges_DNA_constraint) #length of history side of matrices
+        self._using_hedges_DNA_constraint = using_hedges_DNA_constraint
         self._full_message_length = hedges_hooks.get_max_index(self._global_hedge_state_init) #total message length
         self._L = self._full_message_length - len(self._fastforward_seq)#length of message-length side of matrices
         self._alphabet = alphabet #alphabet we are using
@@ -93,6 +87,17 @@ class HedgesBonitoBase:
         self._trellis_transition_values=[]
         self._max_bits=1 #max number of bits per base
         self._device=device
+
+        #initialize connections
+        self._trellis_connections,self._trellis_transition_values = self.calculate_trellis_connections(range(0,self._max_bits+1),self._H) 
+
+        #instantiate scorer class
+        if score=="CTC" and "cuda" in self._device:
+            self._scorer = HedgesBonitoCTCGPU(self._full_message_length,self._H,self._fastforward_seq,self._device,self._letter_to_index)
+        elif score=="CTC" and "cpu" in self._device:
+            self._scorer = HedgesBonitoCTC(self._full_message_length,self._H,self._fastforward_seq,self._device,self._letter_to_index)
+        else: 
+            raise ValueError("Scorer could not be instantiated")
         
     def string_from_backtrace(self,BT_index:np.ndarray,BT_bases:np.ndarray,start_state:int)->str:
         H,L = BT_index.shape
@@ -113,7 +118,6 @@ class HedgesBonitoBase:
 
         @return     string representing basecalled strand
         """
-        self._T = scores.size(0) #time dimension 
 
         #setup backtracing matricies
         BT_index = np.zeros((self._H,self._L),dtype=int)#dtype=torch_get_index_dtype(self._H)) #index backtrace matrix
@@ -139,7 +143,6 @@ class HedgesBonitoBase:
         H_range=torch.arange(self._H)
         pattern_counter=0
         accumulate_base_transition=torch.full((self._H,2**1,3*2),0,dtype=torch.int64)
-        #print("Real Scores size {}".format(self._T))
         for i in range(self._full_message_length-self._L,self._full_message_length):
             #print(i)
             nbits = hedges_hooks.get_nbits(self._global_hedge_state_init,i)
@@ -147,12 +150,11 @@ class HedgesBonitoBase:
             pattern_range=pattern_counter*2
             accumulate_base_transition[:,:,pattern_range:pattern_range+2]=torch.stack([torch.zeros((self._H,2**1),dtype=torch.int64),                                                                             torch.from_numpy(base_transition_outgoing).expand(-1,2**self._max_bits)],dim=2)
             pattern_counter+=1            
-            if nbits==0 and i<self._full_message_length-1:
+            if nbits==0 and i<self._full_message_length-1 and not self._using_hedges_DNA_constraint:
                 BT_index[:,i-sub_length] = np.arange(self._H)  #simply point to the same state
                 BT_bases[:,i-sub_length] = base_transition_outgoing[:,-1] #set base back trace matrix
                 other_C.const_update_context(current_C,BT_index,0,i-sub_length,nbits)
             else:
-                
                 trellis_incoming_indexes=self._trellis_connections[nbits] #Hx2^nbits matrix indicating incoming states from the previous time step
                 trellis_incoming_value = self._trellis_transition_values[nbits]
                 if i-sub_length==0:
@@ -165,16 +167,17 @@ class HedgesBonitoBase:
                                                                                       F,starting_bases.to(self._device),i,nbits)
                 pattern_counter=0 #reset pattern counter
                 #get incoming bases and scores coming in to each state so that the best one can be selected
-                state_scores = self.gather_trans_scores(state_transition_scores_outgoing,trellis_incoming_indexes,trellis_incoming_value)
                 bases = base_transition_outgoing[trellis_incoming_indexes,trellis_incoming_value]#Hx2^n matrix of bases to add
+                mask = self.calculate_trellis_connections_mask(current_C).to(self._device)
+                state_scores = self.gather_trans_scores(state_transition_scores_outgoing,trellis_incoming_indexes,trellis_incoming_value)
+                #masking allows us to effectively eliminate non-sensical scores for given contexts
+                if mask: state_scores = torch.where(mask,state_scores,state_scores.new_full(mask.size(),Log.zero))
                 value_of_max_scores= torch.argmax(state_scores,dim=1) # H-length vectror indicating location of best score
                 current_scores=state_scores.gather(1,value_of_max_scores[:,None])
-
                 cpu_value_of_max_scores = value_of_max_scores.to("cpu")
                 #update back trace matrices
                 BT_index[:,i-sub_length] = trellis_incoming_indexes[H_range,cpu_value_of_max_scores] #set the back trace index with best incoming state
                 BT_bases[:,i-sub_length] = bases[H_range,cpu_value_of_max_scores] #set base back trace matrix
-
                 #update forward arrays
                 incoming_F = temp_f_outgoing[:,trellis_incoming_indexes,trellis_incoming_value]
                 F = incoming_F[:,H_range,value_of_max_scores]
@@ -188,3 +191,43 @@ class HedgesBonitoBase:
         out_seq = self.fastforward_seq+self.string_from_backtrace(BT_index,BT_bases,start_state)
         if reverse: out_seq=complement(out_seq)     
         return out_seq
+
+
+class HedgesBonitoModBase(HedgesBonitoBase):
+    def __init__(self, hedges_param_dict: dict, hedges_bytes: bytes, using_hedges_DNA_constraint: bool, alphabet: list, device: str, score: str) -> None:
+        super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet, device, score)
+        self._mod = 7 #represents the number of mod states we will include in trellis
+           
+    def get_trellis_state_length(self,hedges_param_dict,using_hedges_DNA_constraint)->int:
+        return 2**hedges_param_dict["prev_bits"]*self._mod
+    
+    def get_initial_trellis_index(self,global_hedge_state)->int:
+        history_state = hedges_hooks.get_hedge_context_history(global_hedge_state)
+        mod_state = hedges_hooks.get_hedge_context_mod(global_hedge_state)
+        return history_state*self._mod+mod_state #return the true state including mod
+
+    def calculate_trellis_connections_mask(self,context:ContextManager,nbits:int)->torch.Tensor|None:
+        return torch.from_numpy(context_utils.mask_states(context,nbits,self._mod))
+
+    def calculate_trellis_connections(self, bit_range: range, trellis_states: int) -> tuple[list[torch.Tensor], ...]:
+        #trellis connections when considering additional mod states
+        index_list=[]
+        value_list=[]
+        dtype = torch_get_index_dtype(trellis_states)
+        for nbits in bit_range:
+            incoming_states_matrix=torch.full((trellis_states,(2**nbits)*self._mod),0,dtype=torch.int64)
+            incoming_state_value_matrix=torch.full((trellis_states,(2**nbits)*self._mod),0,dtype=torch.int64)
+            for h in range(trellis_states):
+                history = h//self._mod
+                value,incoming_states = hedges_hooks.get_incoming_states(self._global_hedge_state_init,nbits,history)
+                for prev_index,s_in in incoming_states:
+                    for m in range(self._mod):
+                        prev_index_after_mod = prev_index*self._mod+m
+                        incoming_states_matrix[h,prev_index_after_mod]=s_in*self._mod+m
+                        incoming_state_value_matrix[h,prev_index_after_mod]=value
+            index_list.append(incoming_states_matrix)
+            value_list.append(incoming_state_value_matrix)
+        return index_list,value_list
+    
+
+
