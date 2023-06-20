@@ -130,7 +130,7 @@ class HedgesBonitoBase:
         other_C=C2
 
         #setup forward arrays
-        F=self.init_initial_state_F(scores) #initialize the state corresponding to the initial valid state of the trellis
+        F=self._scorer.init_initial_state_F(scores) #initialize the state corresponding to the initial valid state of the trellis
         current_scores = torch.full((self._H,),Log.zero)
         """
         Perform core algorithm.
@@ -164,7 +164,7 @@ class HedgesBonitoBase:
                 else:
                     starting_bases = torch.from_numpy(BT_bases[:,i-sub_length-1-(pattern_counter-1)])[:,None].expand(-1,2**nbits)
 
-                state_transition_scores_outgoing, temp_f_outgoing = self.forward_step(scores_gpu,
+                state_transition_scores_outgoing, temp_f_outgoing = self._scorer.forward_step(scores_gpu,
                                                                                       accumulate_base_transition[:,:2**nbits,:pattern_range+2].to(self._device),
                                                                                       F,starting_bases.to(self._device),i,nbits)
                 pattern_counter=0 #reset pattern counter
