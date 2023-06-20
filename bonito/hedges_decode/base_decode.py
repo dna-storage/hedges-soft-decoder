@@ -200,8 +200,8 @@ class HedgesBonitoBase:
 class HedgesBonitoModBase(HedgesBonitoBase):
     def __init__(self, hedges_param_dict: dict, hedges_bytes: bytes, using_hedges_DNA_constraint: bool, alphabet: list, device: str, score: str,
                  window:int=0) -> None:
-        super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet, device, score,window=window)
         self._mod = 7 #represents the number of mod states we will include in trellis
+        super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet, device, score,window=window)
            
     def get_trellis_state_length(self,hedges_param_dict,using_hedges_DNA_constraint)->int:
         return 2**hedges_param_dict["prev_bits"]*self._mod
