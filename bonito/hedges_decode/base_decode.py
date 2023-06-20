@@ -73,7 +73,7 @@ class HedgesBonitoBase:
         return context_utils.fill_base_transitions(H,transitions,C,nbits,reverse)
 
     def __init__(self,hedges_param_dict:dict,hedges_bytes:bytes,using_hedges_DNA_constraint:bool,alphabet:list,device:str,
-                 score:str) -> None:
+                 score:str,window:int=0) -> None:
         
         self._global_hedge_state_init = hedges_hooks.make_hedge( hedges.hedges_state(**hedges_param_dict)) #stores pointer to a hedges state object
         self._fastforward_seq=hedges_hooks.fastforward_context(bytes(hedges_bytes),self._global_hedge_state_init) #modifies the global hedge state to reflect state at end of hedges_bytes
@@ -95,7 +95,7 @@ class HedgesBonitoBase:
         if score=="CTC" and "cuda" in self._device:
             self._scorer = HedgesBonitoCTCGPU(self._full_message_length,self._H,self._fastforward_seq,self._device,self._letter_to_index)
         elif score=="CTC" and "cpu" in self._device:
-            self._scorer = HedgesBonitoCTC(self._full_message_length,self._H,self._fastforward_seq,self._device,self._letter_to_index)
+            self._scorer = HedgesBonitoCTC(self._full_message_length,self._H,self._fastforward_seq,self._device,self._letter_to_index,window)
         else: 
             raise ValueError("Scorer could not be instantiated")
         
@@ -194,8 +194,9 @@ class HedgesBonitoBase:
 
 
 class HedgesBonitoModBase(HedgesBonitoBase):
-    def __init__(self, hedges_param_dict: dict, hedges_bytes: bytes, using_hedges_DNA_constraint: bool, alphabet: list, device: str, score: str) -> None:
-        super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet, device, score)
+    def __init__(self, hedges_param_dict: dict, hedges_bytes: bytes, using_hedges_DNA_constraint: bool, alphabet: list, device: str, score: str,
+                 window:int=0) -> None:
+        super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet, device, score,window=window)
         self._mod = 7 #represents the number of mod states we will include in trellis
            
     def get_trellis_state_length(self,hedges_param_dict,using_hedges_DNA_constraint)->int:
