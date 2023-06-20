@@ -94,10 +94,10 @@ class HedgesBonitoBase:
         #instantiate scorer class
         if score=="CTC" and "cuda" in self._device:
             self._scorer = HedgesBonitoCTCGPU(self._full_message_length,self._H,self._fastforward_seq,self._device,self._letter_to_index,
-                                              self.get_initial_trellis_index(),window)
+                                              self.get_initial_trellis_index(self._global_hedge_state_init),window)
         elif score=="CTC" and "cpu" in self._device:
             self._scorer = HedgesBonitoCTC(self._full_message_length,self._H,self._fastforward_seq,self._device,self._letter_to_index,
-                                           self.get_initial_trellis_index(),window)
+                                           self.get_initial_trellis_index(self._global_hedge_state_init),window)
         else: 
             raise ValueError("Scorer could not be instantiated")
         
