@@ -33,7 +33,8 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
 
     @details    Implements the necessary methods to extract information out of Bonito scores when using the Bonito CTC model
     """
-    def __init__(self, full_message_length: int, H: int, fastforward_seq: str, device: str, initial_state_index: int, letter_to_index: dict,window:int) -> None:
+    def __init__(self, full_message_length: int, H: int, fastforward_seq: str, device: str, initial_state_index: int,
+                  letter_to_index: dict,window:int) -> None:
         super().__init__(full_message_length, H, fastforward_seq, device, initial_state_index, letter_to_index)
         self._window = window #indicates size of window to use
         self._current_F_lower=0 #used for windowing
@@ -174,8 +175,9 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
     dot_reduce_kernel=cu.load_cupy_func("cuda/reduce.cu","dot_reduce",FLOAT='float',REDUCE="logsumexp2",ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
    
 
-    def __init__(self, full_message_length: int, H: int, fastforward_seq: str, device: str, initial_state_index: int, letter_to_index: dict) -> None:
-        super().__init__(full_message_length, H, fastforward_seq, device, initial_state_index, letter_to_index)
+    def __init__(self, full_message_length: int, H: int, fastforward_seq: str, device: str,
+                  initial_state_index: int, letter_to_index: dict, window:int) -> None:
+        super().__init__(full_message_length, H, fastforward_seq, device, initial_state_index, letter_to_index,window)
         assert torch.cuda.is_available() #make sure we have cuda for this class
 
     @classmethod

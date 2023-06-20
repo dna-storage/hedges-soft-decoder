@@ -93,7 +93,7 @@ class HedgesBonitoBase:
 
         #instantiate scorer class
         if score=="CTC" and "cuda" in self._device:
-            self._scorer = HedgesBonitoCTCGPU(self._full_message_length,self._H,self._fastforward_seq,self._device,self._letter_to_index)
+            self._scorer = HedgesBonitoCTCGPU(self._full_message_length,self._H,self._fastforward_seq,self._device,self._letter_to_index,window)
         elif score=="CTC" and "cpu" in self._device:
             self._scorer = HedgesBonitoCTC(self._full_message_length,self._H,self._fastforward_seq,self._device,self._letter_to_index,window)
         else: 
