@@ -69,10 +69,10 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
 
             if trellis=="base":
                 #basic trellis with base constraint information taken into account
-                decoder = HedgesBonitoCTCGPU(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet,"cuda:0",window=window)
+                decoder = HedgesBonitoBase(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet,"cuda:0","CTC",window=window)
             elif trellis=="mod":
                 #trellis that accounts for constraints by using the modulo state of contexts
-                decoder = HedgesBonitoModBase(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet,"cuda:0",window=window)
+                decoder = HedgesBonitoModBase(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet,"cuda:0","CTC",window=window)
             else:
                 raise ValueError("Trellis name error")
 
