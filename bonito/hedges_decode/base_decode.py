@@ -32,7 +32,7 @@ class HedgesBonitoBase:
     def get_initial_trellis_index(self,global_hedge_state)->int:
         return 0
     
-    def calculate_trellis_connections_mask(self,context:ContextManager)->torch.Tensor|None:
+    def calculate_trellis_connections_mask(self,context:ContextManager,nbits:int)->torch.Tensor|None:
         return None #for a basic trellis, not using masks
 
     def calculate_trellis_connections(self, bit_range: range, trellis_states: int) -> tuple[list[torch.Tensor], ...]:
@@ -172,7 +172,7 @@ class HedgesBonitoBase:
                 pattern_counter=0 #reset pattern counter
                 #get incoming bases and scores coming in to each state so that the best one can be selected
                 bases = base_transition_outgoing[trellis_incoming_indexes,trellis_incoming_value]#Hx2^n matrix of bases to add
-                mask = self.calculate_trellis_connections_mask(current_C)
+                mask = self.calculate_trellis_connections_mask(current_C,nbits)
                 state_scores = self.gather_trans_scores(state_transition_scores_outgoing,trellis_incoming_indexes,trellis_incoming_value)
                 #masking allows us to effectively eliminate non-sensical scores for given contexts
                 if mask: state_scores = torch.where(mask.to(self._device),state_scores,state_scores.new_full(mask.size(),Log.zero))
