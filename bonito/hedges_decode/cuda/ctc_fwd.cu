@@ -180,9 +180,9 @@ extern "C" __global__ void dot_mul(
 					    int target_scores_L
 				   )
 {
-  int Hidx = threadIdx.y;
-  int Eidx = threadIdx.x;
   int Tidx = threadIdx.z+blockDim.z*blockIdx.x;
+  int Hidx = threadIdx.y+blockDim.z*blockIdx.y;
+  int Eidx = threadIdx.x;
   if(Tidx<T){
     int H = blockDim.y;
     int E = blockDim.x;

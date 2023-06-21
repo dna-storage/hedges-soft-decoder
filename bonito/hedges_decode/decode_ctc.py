@@ -185,21 +185,32 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
         T,H,E,L = target_scores.size()
         z = alpha_t.new_zeros((T,H,E))
         with cp.cuda.Device(0):
-            t_per_block = 1024//(H*E)
-            total_blocks = (T//t_per_block)+1
+            #With bigger H, blocking needs to be reformulated
+            #1024 >= H*E*t_per_block
+            #1024//E = H*t_per_block, E is some power of 2 
+            #H is a multiple of some 2^n so pick t_per_block to be some power of 2
+            t_per_block = 64
+            h_per_block = 1024//(t_per_block*E)
+            total_t_blocks = (T//t_per_block)+1
+            assert H%h_per_block==0 #this should divide evenly
+            total_h_blocks = (H//h_per_block) 
             #perform multiplication of dot product
-            HedgesBonitoCTCGPU.dot_mul_kernel(grid=(total_blocks,1,1),block=(E,H,t_per_block),shared_mem = 0, args=(target_scores.data_ptr(),alpha_t.data_ptr(),z.data_ptr(),T,L))
-            #now we need to reduce along the time direction
-            stride=1
+            HedgesBonitoCTCGPU.dot_mul_kernel(grid=(total_t_blocks,total_h_blocks,1),block=(E,h_per_block,t_per_block),shared_mem = 0, args=(target_scores.data_ptr(),alpha_t.data_ptr(),z.data_ptr(),T,L))
+            #We can make this more efficient by reducing the number of dead threads
+            stride=1 # this indicates where to find the next valid time value for reduction
             while True:
-                total_T_blocks=T//2048
-                if T%2048!=0:
+                t_per_block = 32 #all t should fit in a warp
+                total_t_calculated_per_step = t_per_block*2
+                h_per_block =1024//(t_per_block*E)
+                assert H%h_per_block==0 #this should divide evenly
+                total_h_blocks=H//h_per_block
+                total_T_blocks=T//(total_t_calculated_per_step)
+                if T%total_t_calculated_per_step!=0:
                     total_T_blocks +=1
-                HedgesBonitoCTCGPU.dot_reduce_kernel(grid=(H,E,total_T_blocks),block=(1024,1,1),shared_mem = 1024*4, args=(z.data_ptr(),z.data_ptr(),T,stride))
-                if T<2048:
-                    break
+                HedgesBonitoCTCGPU.dot_reduce_kernel(grid=(total_h_blocks,total_T_blocks,1),block=(t_per_block,E,h_per_block),shared_mem = 1024*4, args=(z.data_ptr(),z.data_ptr(),T,stride,H,E))
+                if T<total_t_calculated_per_step: break
                 T=total_T_blocks
-                stride*=2048
+                stride*=(total_t_calculated_per_step)
         return z[0,:,:]
     
     @classmethod
@@ -220,10 +231,13 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             r_1 = 0
             r_2 = upper_t_range-lower_t_range
             f_offset=pad-1
-        
+
         with cp.cuda.Device(0):
-            h_divider=L//2
-            h_per_block=H//h_divider
+            #Need to break down L,H,E into block sizes <=1024
+            #L can't be moved because of thread sync. dependency
+            #1024/L = H*E
+            #E is typically small (at most 2 for now), so we can just do 1024//(L*E) for H threads per block
+            h_per_block = 1024//(L*E)
             H_blocks = (H//h_per_block)+1
             HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,1,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,args=(target_scores.data_ptr(),y.data_ptr(),
                                                                                                                                    mask.data_ptr(),w.data_ptr(),r_1,r_2,

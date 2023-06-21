@@ -15,31 +15,33 @@ extern "C" __global__ void dot_reduce(
 				      FLOAT* input,
 				      FLOAT* output,
 				      int T,
-				      int stride
+				      int stride,
+              int H,
+              int E
 				      )
 {
   extern __shared__ FLOAT smem[];
-  int Eidx = blockIdx.y;
-  int Hidx = blockIdx.x;
-  int Tidx = threadIdx.x+blockIdx.z*blockDim.x;
-  int ThrIdx = threadIdx.x;
+  int Eidx = threadIdx.y;
+  int Hidx = threadIdx.z+blockDim.z*blockIdx.x;
+  int Tidx = threadIdx.x+blockDim.x*blockIdx.y;
+  int smem_idx = threadIdx.z*blockDim.y*blockDim.x+threadIdx.y*blockDim.x+threadIdx.x
   int start=Tidx*2*stride;
-  if(start+stride<T*stride) smem[ThrIdx]=REDUCE(input[start*gridDim.x*gridDim.y+Hidx*gridDim.y+Eidx],input[(start+stride)*gridDim.x*gridDim.y+Hidx*gridDim.y+Eidx]);
+  if(start+stride<T*stride) smem[smem_idx]=REDUCE(input[start*H*E+Hidx*E+Eidx],input[(start+stride)*H*E+Hidx*E+Eidx]);
   else if(start<T*stride) {
-    smem[ThrIdx]=input[start*gridDim.x*gridDim.y+Hidx*gridDim.y+Eidx];
+    smem[smem_idx]=input[start*H*E+Hidx*E+Eidx];
   }
   else {
-    smem[ThrIdx]=ZERO;
+    smem[smem_idx]=ZERO;
   }
   __syncthreads();
-  for(int s = 512; s>0; s=s>>1){
-    if(ThrIdx<s){
-      smem[ThrIdx]=REDUCE(smem[ThrIdx],smem[ThrIdx+s]);
+  for(int s = blockDim.x; s>0; s=s>>1){
+    if(threadIdx.x<s){
+      smem[smem_idx]=REDUCE(smem[smem_idx],smem[smem_idx+s]);
     }
     __syncthreads();
     //if(blockIdx.z==0 && Hidx==0 && Eidx==0) printf("s %d Tidx %d start %d T %d  %f \n",s, Tidx,start,T,smem[ThrIdx]);
   }
-  if(ThrIdx==0) {
-    output[start*gridDim.x*gridDim.y+Hidx*gridDim.y+Eidx]=smem[0];
+  if(threadIdx.x==0) {
+    output[start*H*E+Hidx*E+Eidx]=smem[smem_idx];
   }
 }
