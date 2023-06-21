@@ -195,7 +195,8 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             assert H%h_per_block==0 #this should divide evenly
             total_h_blocks = (H//h_per_block) 
             #perform multiplication of dot product
-            HedgesBonitoCTCGPU.dot_mul_kernel(grid=(total_t_blocks,total_h_blocks,1),block=(E,h_per_block,t_per_block),shared_mem = 0, args=(target_scores.data_ptr(),alpha_t.data_ptr(),z.data_ptr(),T,L))
+            HedgesBonitoCTCGPU.dot_mul_kernel(grid=(total_t_blocks,total_h_blocks,1),block=(E,h_per_block,t_per_block),shared_mem = 0, args=(target_scores.data_ptr(),alpha_t.data_ptr(),
+                                                                                                                                             z.data_ptr(),T,L,H,E))
             #We can make this more efficient by reducing the number of dead threads
             stride=1 # this indicates where to find the next valid time value for reduction
             while True:

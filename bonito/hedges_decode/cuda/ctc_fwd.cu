@@ -75,9 +75,6 @@ extern "C" __global__ void fwd_logspace(
 }
 
 
-
-
-
 extern "C" __global__ void fwd_logspace_align(
 					    const FLOAT* __restrict__ target_scores,
 					    FLOAT* __restrict__ F,
@@ -87,9 +84,6 @@ extern "C" __global__ void fwd_logspace_align(
 					    int L,
 					    int L_pad
 					)
-
-
-
 {
   int Lidx = threadIdx.x;
   int total_L = L+L_pad;
@@ -177,15 +171,15 @@ extern "C" __global__ void dot_mul(
 					    const FLOAT* __restrict__ alpha_t,
 					    FLOAT* __restrict__ output,
 					    int T,
-					    int target_scores_L
+					    int target_scores_L,
+              int H,
+              int E
 				   )
 {
   int Tidx = threadIdx.z+blockDim.z*blockIdx.x;
-  int Hidx = threadIdx.y+blockDim.z*blockIdx.y;
+  int Hidx = threadIdx.y+blockDim.y*blockIdx.y;
   int Eidx = threadIdx.x;
   if(Tidx<T){
-    int H = blockDim.y;
-    int E = blockDim.x;
     int idx = Tidx*H*E+Hidx*E+Eidx;
     int idx2= (idx+H*E)*target_scores_L+target_scores_L-1;
     if(Tidx+1<T)

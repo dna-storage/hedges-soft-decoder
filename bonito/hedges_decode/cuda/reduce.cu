@@ -34,7 +34,7 @@ extern "C" __global__ void dot_reduce(
     smem[smem_idx]=ZERO;
   }
   __syncthreads();
-  for(int s = blockDim.x; s>0; s=s>>1){
+  for(int s = blockDim.x/2; s>0; s=s>>1){
     if(threadIdx.x<s){
       smem[smem_idx]=REDUCE(smem[smem_idx],smem[smem_idx+s]);
     }
