@@ -24,7 +24,7 @@ extern "C" __global__ void dot_reduce(
   int Eidx = threadIdx.y;
   int Hidx = threadIdx.z+blockDim.z*blockIdx.x;
   int Tidx = threadIdx.x+blockDim.x*blockIdx.y;
-  int smem_idx = threadIdx.z*blockDim.y*blockDim.x+threadIdx.y*blockDim.x+threadIdx.x
+  int smem_idx = threadIdx.z*blockDim.y*blockDim.x+threadIdx.y*blockDim.x+threadIdx.x;
   int start=Tidx*2*stride;
   if(start+stride<T*stride) smem[smem_idx]=REDUCE(input[start*H*E+Hidx*E+Eidx],input[(start+stride)*H*E+Hidx*E+Eidx]);
   else if(start<T*stride) {
