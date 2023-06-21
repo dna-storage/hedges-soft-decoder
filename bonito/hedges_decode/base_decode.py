@@ -212,7 +212,7 @@ class HedgesBonitoModBase(HedgesBonitoBase):
         return history_state*self._mod+mod_state #return the true state including mod
 
     def calculate_trellis_connections_mask(self,context:ContextManager,nbits:int)->torch.Tensor|None:
-        return torch.from_numpy(context_utils.mask_states(context,nbits,self._mod))
+        return torch.from_numpy(context_utils.mod_mask_states(context,nbits,self._mod))
 
     def calculate_trellis_connections(self, bit_range: range, trellis_states: int) -> tuple[list[torch.Tensor], ...]:
         #trellis connections when considering additional mod states
