@@ -6,10 +6,11 @@ cimport numpy as cnp
 import cython
 from libcpp cimport bool
 from cpython cimport PyLong_AsVoidPtr, PyDict_GetItem, PyLong_AsLong
-ctypedef cnp.int64_t DTYPE_t
 from libcpp.map cimport map
 
 DTYPE=np.int64
+ctypedef cnp.int64_t DTYPE_t
+
 
 cdef class ContextManager:
    cdef void** _contexts
@@ -82,7 +83,7 @@ def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool 
 @cython.boundscheck(False)
 @cython.wraparound(False)
 def mod_mask_states(ContextManager c,int nbits, int num_mods):
-    cdef cnp.ndarray[DTYPE_t,ndim=2] mod_mask= np.zeros([c._H, (1<<nbits)*num_mods], dtype=np.int32_t )
+    cdef cnp.ndarray[DTYPE_t,ndim=2] mod_mask= np.zeros([c._H, (1<<nbits)*num_mods], dtype=DTYPE )
     cdef int i
     cdef int j
     cdef void* context
