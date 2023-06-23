@@ -107,10 +107,14 @@ class HedgesBonitoBase:
         H,L = BT_index.shape
         current_state=torch.tensor(start_state)
         return_sequence=""
+        states=[]
         for i in torch.flip(torch.arange(L,dtype=torch.int64),dims=(0,)):
             return_sequence+=self._alphabet[int(BT_bases[current_state,i])]
             if i==0: break
+            states.append(current_state)
             current_state=BT_index[current_state,i]
+        for indx,i in enumerate(states[::-1]): 
+            print("{}:{}".format(indx,i),end=" ")
         return return_sequence[::-1]
 
     @profile
@@ -169,13 +173,15 @@ class HedgesBonitoBase:
                 state_transition_scores_outgoing, temp_f_outgoing = self._scorer.forward_step(scores_gpu,
                                                                                       accumulate_base_transition[:,:2**nbits,:pattern_range+2].to(self._device),
                                                                                       F,starting_bases.to(self._device),i,nbits)
+                #torch.cuda.synchronize()
                 pattern_counter=0 #reset pattern counter
                 #get incoming bases and scores coming in to each state so that the best one can be selected
                 bases = base_transition_outgoing[trellis_incoming_indexes,trellis_incoming_value]#Hx2^n matrix of bases to add
                 mask = self.calculate_trellis_connections_mask(current_C,nbits)
                 state_scores = self.gather_trans_scores(state_transition_scores_outgoing,trellis_incoming_indexes,trellis_incoming_value)
                 #masking allows us to effectively eliminate non-sensical scores for given contexts
-                if mask: state_scores = torch.where(mask.to(self._device),state_scores,state_scores.new_full(mask.size(),Log.zero))
+                #print(mask[500])
+                if not mask is None: state_scores = torch.where(mask.to(self._device),state_scores,state_scores.new_full(mask.size(),Log.zero))
                 value_of_max_scores= torch.argmax(state_scores,dim=1) # H-length vectror indicating location of best score
                 current_scores=state_scores.gather(1,value_of_max_scores[:,None])
                 cpu_value_of_max_scores = value_of_max_scores.to("cpu")
