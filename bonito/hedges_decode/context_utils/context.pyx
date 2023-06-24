@@ -83,7 +83,7 @@ def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool 
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-def mod_mask_states(ContextManager c,int nbits, int num_mods):
+def mod_mask_states(ContextManager c,int nbits, int num_mods, cnp.ndarray[cnp.uint8_t,ndim=1] dead_state):
     cdef cnp.ndarray[cnp.uint8_t,ndim=2] mod_mask= np.zeros([c._H, (1<<nbits)*num_mods], dtype=np.uint8 )
     cdef int i
     cdef int j
@@ -104,7 +104,9 @@ def mod_mask_states(ContextManager c,int nbits, int num_mods):
         value_to_next_state = mods.val_to_next
         for j in range(mods.num_valid_mods):
             next_state = mods.next_states[j]*num_mods+mods.next_mods[j]
-            mod_mask[next_state,value_to_next_state*num_mods+current_mod_index] = 1
+            if not dead_state[i]:
+                mod_mask[next_state,value_to_next_state*num_mods+current_mod_index] = 1 
+
     free(next_states_buffer)
     free(next_mods_buffer)
     return mod_mask

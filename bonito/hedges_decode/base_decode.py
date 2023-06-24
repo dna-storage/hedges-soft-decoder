@@ -151,6 +151,7 @@ class HedgesBonitoBase:
         H_range=torch.arange(self._H)
         pattern_counter=0
         accumulate_base_transition=torch.full((self._H,2**1,3*2),0,dtype=torch.int64)
+        state_is_dead = torch.zeros((self._H),dtype=torch.uint8)
         for i in range(self._full_message_length-self._L,self._full_message_length):
             #print(i)
             nbits = hedges_hooks.get_nbits(self._global_hedge_state_init,i)
@@ -177,14 +178,17 @@ class HedgesBonitoBase:
                 pattern_counter=0 #reset pattern counter
                 #get incoming bases and scores coming in to each state so that the best one can be selected
                 bases = base_transition_outgoing[trellis_incoming_indexes,trellis_incoming_value]#Hx2^n matrix of bases to add
-                mask = self.calculate_trellis_connections_mask(current_C,nbits)
+                mask = self.calculate_trellis_connections_mask(current_C,nbits,state_is_dead.numpy())
                 state_scores = self.gather_trans_scores(state_transition_scores_outgoing,trellis_incoming_indexes,trellis_incoming_value)
                 #masking allows us to effectively eliminate non-sensical scores for given contexts
                 #print(mask[500])
-                if not mask is None: state_scores = torch.where(mask.to(self._device),state_scores,state_scores.new_full(mask.size(),Log.zero))
+                if not mask is None:
+                    state_scores = torch.where(mask.to(self._device).bool(),state_scores,state_scores.new_full(mask.size(),Log.zero))
                 value_of_max_scores= torch.argmax(state_scores,dim=1) # H-length vectror indicating location of best score
                 current_scores=state_scores.gather(1,value_of_max_scores[:,None])
                 cpu_value_of_max_scores = value_of_max_scores.to("cpu")
+                if not mask is None:
+                    state_is_dead=(state_is_dead<=Log.zero).to(torch.uint8)
                 #update back trace matrices
                 BT_index[:,i-sub_length] = trellis_incoming_indexes[H_range,cpu_value_of_max_scores] #set the back trace index with best incoming state
                 BT_bases[:,i-sub_length] = bases[H_range,cpu_value_of_max_scores] #set base back trace matrix
