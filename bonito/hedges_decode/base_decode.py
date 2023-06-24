@@ -32,7 +32,7 @@ class HedgesBonitoBase:
     def get_initial_trellis_index(self,global_hedge_state)->int:
         return 0
     
-    def calculate_trellis_connections_mask(self,context:ContextManager,nbits:int)->torch.Tensor|None:
+    def calculate_trellis_connections_mask(self,context:ContextManager,nbits:int,dead_states:np.ndarray)->torch.Tensor|None:
         return None #for a basic trellis, not using masks
 
     def calculate_trellis_connections(self, bit_range: range, trellis_states: int) -> tuple[list[torch.Tensor], ...]:
@@ -221,8 +221,8 @@ class HedgesBonitoModBase(HedgesBonitoBase):
         mod_state = hedges_hooks.get_hedge_context_mod(global_hedge_state)
         return history_state*self._mod+mod_state #return the true state including mod
 
-    def calculate_trellis_connections_mask(self,context:ContextManager,nbits:int)->torch.Tensor|None:
-        return torch.from_numpy(context_utils.mod_mask_states(context,nbits,self._mod))
+    def calculate_trellis_connections_mask(self,context:ContextManager,nbits:int,dead_states:np.ndarray)->torch.Tensor|None:
+        return torch.from_numpy(context_utils.mod_mask_states(context,nbits,self._mod,dead_states))
 
     def calculate_trellis_connections(self, bit_range: range, trellis_states: int) -> tuple[list[torch.Tensor], ...]:
         #trellis connections when considering additional mod states
