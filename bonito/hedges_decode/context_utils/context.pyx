@@ -83,7 +83,7 @@ def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool 
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-def mod_mask_states(ContextManager c,int nbits, int num_mods, cnp.ndarray[cnp.uint8_t,ndim=1] dead_state):
+def mod_mask_states(ContextManager c,int nbits, int num_mods, cnp.ndarray[cnp.uint8_t,ndim=1] dead_state, int num_bits=3):
     cdef cnp.ndarray[cnp.uint8_t,ndim=2] mod_mask= np.zeros([c._H, (1<<nbits)*num_mods], dtype=np.uint8 )
     cdef int i
     cdef int j
@@ -100,10 +100,10 @@ def mod_mask_states(ContextManager c,int nbits, int num_mods, cnp.ndarray[cnp.ui
     for i in range(c._H):
         context = c._contexts[i]
         current_mod_index = i%num_mods
-        mods=hedges_hooks_c.get_valid_mods(context,nbits,next_states_buffer,next_mods_buffer)
+        mods=hedges_hooks_c.get_valid_mods_hash(context,nbits,next_states_buffer,next_mods_buffer)
         value_to_next_state = mods.val_to_next
         for j in range(mods.num_valid_mods):
-            next_state = mods.next_states[j]*num_mods+mods.next_mods[j]
+            next_state = mods.next_states[j]*num_mods+(mods.next_mods[j]&(1<<num_bits)-1)
             if not dead_state[i]:
                 mod_mask[next_state,value_to_next_state*num_mods+current_mod_index] = 1 
 

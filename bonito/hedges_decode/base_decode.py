@@ -184,11 +184,12 @@ class HedgesBonitoBase:
                 #print(mask[500])
                 if not mask is None:
                     state_scores = torch.where(mask.to(self._device).bool(),state_scores,state_scores.new_full(mask.size(),Log.zero))
-                value_of_max_scores= torch.argmax(state_scores,dim=1) # H-length vectror indicating location of best score
+                m,value_of_max_scores= torch.max(state_scores,dim=1) # H-length vectror indicating location of best score
                 current_scores=state_scores.gather(1,value_of_max_scores[:,None])
                 cpu_value_of_max_scores = value_of_max_scores.to("cpu")
-                if not mask is None:
-                    state_is_dead=(state_is_dead<=Log.zero).to(torch.uint8)
+                if not mask is None:    
+                    state_is_dead=(m<=Log.zero).to(torch.uint8).to("cpu")
+
                 #update back trace matrices
                 BT_index[:,i-sub_length] = trellis_incoming_indexes[H_range,cpu_value_of_max_scores] #set the back trace index with best incoming state
                 BT_bases[:,i-sub_length] = bases[H_range,cpu_value_of_max_scores] #set base back trace matrix
@@ -210,7 +211,8 @@ class HedgesBonitoBase:
 class HedgesBonitoModBase(HedgesBonitoBase):
     def __init__(self, hedges_param_dict: dict, hedges_bytes: bytes, using_hedges_DNA_constraint: bool, alphabet: list, device: str, score: str,
                  window:int=0) -> None:
-        self._mod = 7 #represents the number of mod states we will include in trellis
+        self._mod = 8 #represents the number of mod states we will include in trellis
+        self._mod_bits = int(math.ceil(math.log2(8)))
         super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet, device, score,window=window)
            
     def get_trellis_state_length(self,hedges_param_dict,using_hedges_DNA_constraint)->int:
@@ -222,7 +224,7 @@ class HedgesBonitoModBase(HedgesBonitoBase):
         return history_state*self._mod+mod_state #return the true state including mod
 
     def calculate_trellis_connections_mask(self,context:ContextManager,nbits:int,dead_states:np.ndarray)->torch.Tensor|None:
-        return torch.from_numpy(context_utils.mod_mask_states(context,nbits,self._mod,dead_states))
+        return torch.from_numpy(context_utils.mod_mask_states(context,nbits,self._mod,dead_states,self._mod_bits))
 
     def calculate_trellis_connections(self, bit_range: range, trellis_states: int) -> tuple[list[torch.Tensor], ...]:
         #trellis connections when considering additional mod states

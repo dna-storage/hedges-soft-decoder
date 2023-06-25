@@ -17,3 +17,5 @@ cdef extern from "hedges_hooks_c.h":
     ctypedef mod_struct mod_struct_t
 
     mod_struct_t get_valid_mods(void*c, int nbits, int* next_states_buffer, int* next_mods_buffer)
+
+    mod_struct_t get_valid_mods_hash(void*c, int nbits, int* next_states_buffer, int* next_mods_buffer)
