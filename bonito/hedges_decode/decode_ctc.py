@@ -162,8 +162,7 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
         #calculate valid ranges of t to avoid unnecessary iterations
 
         alpha_t = self._fwd_algorithm(target_scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,lower_t_range-self._current_F_lower)
-        #if PLOT and strand_index==504: plot_scores(alpha_t,lower_t_range,upper_t_range,True)
-        if PLOT and strand_index==1002: plot_scores(alpha_t,int((T*lower_t_range/2160)-1000),int((T*lower_t_range/2160)+1000),True,int(T*lower_t_range/2160))
+        if PLOT and strand_index==(864+48): plot_scores(alpha_t,lower_t_range,upper_t_range,True,plot_list=[0])
         out_scores=self._dot_product(target_scores,alpha_t)
         self._current_F_lower=lower_t_range #keeps track of most recent lower_t_range
         return out_scores,alpha_t

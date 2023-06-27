@@ -110,11 +110,12 @@ class HedgesBonitoBase:
         states=[]
         for i in torch.flip(torch.arange(L,dtype=torch.int64),dims=(0,)):
             return_sequence+=self._alphabet[int(BT_bases[current_state,i])]
-            if i==0: break
             states.append(current_state)
+            if i==0: break
             current_state=BT_index[current_state,i]
-        for indx,i in enumerate(states[::-1]): 
-            print("{}:{}".format(indx,i),end=" ")
+        #for indx,i in enumerate(states[::-1]): 
+            #print("{}:{}".format(indx,i),end=" ")
+        
         return return_sequence[::-1]
 
     @profile
