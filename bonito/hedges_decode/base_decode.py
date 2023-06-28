@@ -290,6 +290,7 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
                     prev_state = base&0x1
                     mask[h,prev_state*self._mod+mod_from_prev_state]=1
             l.append(mask.bool())
+        return l
 
     def calculate_trellis_connections_mask(self,context:ContextManager,nbits:int,dead_states:np.ndarray)->torch.Tensor|None:
         #should be able to calculate a static mask
