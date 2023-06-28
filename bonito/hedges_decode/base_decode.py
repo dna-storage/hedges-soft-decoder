@@ -252,11 +252,10 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
     def __init__(self, hedges_param_dict: dict, hedges_bytes: bytes, using_hedges_DNA_constraint: bool, alphabet: list, device: str, score: str,
                  window:int=0) -> None:
         self._mod = 3 #represents the number of states per history state
-        self._mod_bits = int(math.ceil(math.log2(8)))
         super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet, device, score,window=window)
         #TODO: calculate static mask for delay states
         self._height = int(math.ceil(math.log2(self._mod)))
-        self._mask = self._calculate_trellis_connections_mask(self._mod_bits)
+        self._mask = self._calculate_trellis_connections_mask(range(0,self._max_bits+1))
 
     def get_trellis_state_length(self,hedges_param_dict,using_hedges_DNA_constraint)->int:
         return 2**hedges_param_dict["prev_bits"]*self._mod
