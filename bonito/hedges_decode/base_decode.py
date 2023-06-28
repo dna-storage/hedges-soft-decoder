@@ -285,7 +285,7 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
                     while mod>(2**level)-1: level+=1
                     #need to select the previous state and the mod from the previous state
                     base = mod - sum([2**i for i in range(0,level)])
-                    assert base>0
+                    assert base>=0
                     mod_from_prev_state = base>>1
                     prev_state = base&0x1
                     mask[h,prev_state*self._mod+mod_from_prev_state]=1
