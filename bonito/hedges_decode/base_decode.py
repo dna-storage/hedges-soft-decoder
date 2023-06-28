@@ -248,4 +248,71 @@ class HedgesBonitoModBase(HedgesBonitoBase):
         return index_list,value_list
     
 
+class HedgesBonitoDelayStates(HedgesBonitoBase):
+    def __init__(self, hedges_param_dict: dict, hedges_bytes: bytes, using_hedges_DNA_constraint: bool, alphabet: list, device: str, score: str,
+                 window:int=0) -> None:
+        self._mod = 3 #represents the number of states per history state
+        self._mod_bits = int(math.ceil(math.log2(8)))
+        super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet, device, score,window=window)
+        #TODO: calculate static mask for delay states
+        self._height = int(math.ceil(math.log2(self._mod)))
+        self._mask = self._calculate_trellis_connections_mask(self._mod_bits)
+
+    def get_trellis_state_length(self,hedges_param_dict,using_hedges_DNA_constraint)->int:
+        return 2**hedges_param_dict["prev_bits"]*self._mod
+    
+    def get_initial_trellis_index(self,global_hedge_state)->int:
+        history_state = hedges_hooks.get_hedge_context_history(global_hedge_state)
+        return history_state*self._mod
+
+    def _calculate_trellis_connections_mask(self,bit_range:range)->list[torch.Tensor]:
+        l = []
+        for nbits in bit_range:
+            mask = torch.zeros((self._H,self._mod*2**nbits))
+            for h in range(self._H):
+                #break down the state into its mod and history component
+                history = h//self._mod
+                mod = h%self._mod
+                if nbits==0: #if it is zero bits, state should only accept edge from itself
+                    mask[h,mod]=1
+                    continue
+                #now, considering the history and the mod, determine which states the current state needs to source from, place 1's there 
+                level = int(math.ceil(math.log2(mod)))
+                if level==0:
+                    value,incoming_states = hedges_hooks.get_incoming_states(self._global_hedge_state_init,nbits,history)
+                    for s in range(incoming_states):
+                        for i in range(2**(self._height-1)-1,self._mod): mask[h,s*self._mod+i]=1
+                else:
+                    #need to select the previous state and the mod from the previous state
+                    base = mod - sum([2**i for i in range(0,level)])
+                    assert base>0
+                    mod_from_prev_state = base>>1
+                    prev_state = base&0x1
+                    mask[h,prev_state*self._mod+mod_from_prev_state]=1
+            l.append(mask.bool())
+
+    def calculate_trellis_connections_mask(self,context:ContextManager,nbits:int,dead_states:np.ndarray)->torch.Tensor|None:
+        #should be able to calculate a static mask
+        return self._mask[nbits]
+
+    def calculate_trellis_connections(self, bit_range: range, trellis_states: int) -> tuple[list[torch.Tensor], ...]:
+        #trellis connections when considering additional mod states
+        index_list=[]
+        value_list=[]
+        for nbits in bit_range:
+            incoming_states_matrix=torch.full((trellis_states,(2**nbits)*self._mod),0,dtype=torch.int64)
+            incoming_state_value_matrix=torch.full((trellis_states,(2**nbits)*self._mod),0,dtype=torch.int64)
+            for h in range(trellis_states):
+                history = h//self._mod
+                value,incoming_states = hedges_hooks.get_incoming_states(self._global_hedge_state_init,nbits,history)
+                for prev_index,s_in in incoming_states:
+                    for m in range(self._mod):
+                        prev_index_after_mod = prev_index*self._mod+m
+                        incoming_states_matrix[h,prev_index_after_mod]=s_in*self._mod+m
+                        incoming_state_value_matrix[h,prev_index_after_mod]=value
+            index_list.append(incoming_states_matrix)
+            value_list.append(incoming_state_value_matrix)
+        return index_list,value_list
+    
+
 
