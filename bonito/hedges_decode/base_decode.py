@@ -278,7 +278,7 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
                 #now, considering the history and the mod, determine which states the current state needs to source from, place 1's there 
                 if mod==0:
                     value,incoming_states = hedges_hooks.get_incoming_states(self._global_hedge_state_init,nbits,history)
-                    for s in range(incoming_states):
+                    for s in range(len(incoming_states)):
                         for i in range(2**(self._height-1)-1,self._mod): mask[h,s*self._mod+i]=1
                 else:
                     level = 0 
