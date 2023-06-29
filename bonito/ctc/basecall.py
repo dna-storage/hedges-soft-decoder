@@ -34,7 +34,8 @@ def basecall(model, reads, beamsize=5, chunksize=0, overlap=0, batchsize=1, qsco
     if kwargs.get("hedges_params",None)!=None:
         alphabet=model.alphabet
         decoder = partial(hedges_decode,hedges_params = kwargs["hedges_params"],hedges_bytes=kwargs["hedges_bytes"],
-                          using_hedges_DNA_constraint=kwargs["hedges_using_DNA_constraint"],alphabet=alphabet,endpoint_seq=kwargs["strand_pad"],window=kwargs["window"])
+                          using_hedges_DNA_constraint=kwargs["hedges_using_DNA_constraint"],alphabet=alphabet,endpoint_seq=kwargs["strand_pad"],window=kwargs["window"],
+                          trellis=kwargs["trellis"],mod_states=kwargs["mod_states"])
     else:
         decoder = partial(decode, decode=model.decode, beamsize=beamsize, qscores=qscores, stride=model.stride)
     #pickle.dump([(read,s['scores']) for read,s in scores],open("debug_scores","wb+"))

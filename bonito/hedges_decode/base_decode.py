@@ -118,7 +118,7 @@ class HedgesBonitoBase:
         
         return return_sequence[::-1]
 
-    @profile
+    #@profile
     def decode(self,scores:torch.Tensor,reverse:bool)->str:
         """
         @brief      Core algorithm for implementing hedges viterbi decoding
@@ -250,8 +250,8 @@ class HedgesBonitoModBase(HedgesBonitoBase):
 
 class HedgesBonitoDelayStates(HedgesBonitoBase):
     def __init__(self, hedges_param_dict: dict, hedges_bytes: bytes, using_hedges_DNA_constraint: bool, alphabet: list, device: str, score: str,
-                 window:int=0) -> None:
-        self._mod = 3 #represents the number of states per history state
+                 window:int=0,mod_states:int=3) -> None:
+        self._mod = mod_states #represents the number of states per history state
         super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet, device, score,window=window)
         #TODO: calculate static mask for delay states
         self._height = int(math.ceil(math.log2(self._mod)))
@@ -281,14 +281,18 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
                     for s in range(len(incoming_states)):
                         for i in range(2**(self._height-1)-1,self._mod): mask[h,s*self._mod+i]=1
                 else:
-                    level = 0 
-                    while mod>(2**level): level+=1
+                    level = int(math.floor(math.log2(mod+1)))
                     #need to select the previous state and the mod from the previous state
                     base = mod - sum([2**i for i in range(0,level)])
-                    assert base>=0
                     mod_from_prev_state = base>>1
                     prev_state = base&0x1
+                    #print("assfd")
+                    #print(mod)
+                    #print(level)
+                    #print(prev_state)
+                    #print(base)
                     mask[h,prev_state*self._mod+mod_from_prev_state]=1
+                #print(mask[h,:])
             l.append(mask.bool())
         return l
 

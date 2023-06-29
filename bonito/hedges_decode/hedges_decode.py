@@ -33,10 +33,10 @@ def check_hedges_params(hedges_params_dict)->None:
         
 
 
-@profile
+#@profile
 def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                   using_hedges_DNA_constraint:bool,alphabet:list,stride=1,
-                  endpoint_seq:str="",window=0,trellis="base")->dict:
+                  endpoint_seq:str="",window=0,trellis="base",mod_states=3)->dict:
     """
         @brief      Top level function for decoding CTC-style outputes to hedges strands
 
@@ -72,7 +72,7 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                 decoder = HedgesBonitoBase(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet,"cuda:0","CTC",window=window)
             elif trellis=="mod":
                 #trellis that accounts for constraints by using the modulo state of contexts
-                decoder = HedgesBonitoDelayStates(hedges_params_dict,hedges_bytes,True,alphabet,"cuda:0","CTC",window=window)
+                decoder = HedgesBonitoDelayStates(hedges_params_dict,hedges_bytes,True,alphabet,"cuda:0","CTC",window=window,mod_states=mod_states)
             else:
                 raise ValueError("Trellis name error")
 

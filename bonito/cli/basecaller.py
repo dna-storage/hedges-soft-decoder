@@ -136,7 +136,9 @@ def main(args):
         hedges_using_DNA_constraint=args.hedges_use_dna_constraint,
         strand_pad=args.strand_pad,
         rna=args.rna,
-        window=args.window
+        window=args.window,
+        trellis=args.trellis,
+        mod_states=args.mod_states
     )
     
     if mods_model is not None:
@@ -218,4 +220,6 @@ def argparser():
     parser.add_argument("--disable_koi",default=False,action="store_true",help="Use this flag when using CTC-based model to avoid errors")
     parser.add_argument("--disable_half",action="store_true",default=False,help="Disables half precision on the model ")
     parser.add_argument("--window",action="store",type=int,default=0,help="window to use for ctc decoding")
+    parser.add_argument("--trellis",action="store",type=str,default="base",help="trellis type to use")
+    parser.add_argument("--mod_states",action="store",type=int,default=3,help="number of states per history")
     return parser
