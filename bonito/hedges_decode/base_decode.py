@@ -61,6 +61,7 @@ class HedgesBonitoBase:
     @fastforward_seq.setter
     def fastforward_seq(self,s):
         self._fastforward_seq=s
+        self._scorer._fastforward_seq=s
 
     def fill_base_transitions(self,H:int,transitions:int,C:ContextManager,nbits:int,reverse:bool)->np.ndarray:
         """
