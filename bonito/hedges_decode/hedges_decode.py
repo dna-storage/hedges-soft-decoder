@@ -102,6 +102,7 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
             if Log.mul(f_hedges_score,f_endpoint_score)>Log.mul(r_endpoint_score,r_hedges_score):
                 #print("IS FORWARD")
                 s=scores[f_endpoint_upper_index:f_hedges_bytes_upper_index]
+                #s=scores[:f_hedges_bytes_upper_index]
                 #print(" {} {}".format(f_endpoint_upper_index,f_hedges_bytes_upper_index))
                 s=s.flip([0])
                 complement_trellis=False
@@ -115,6 +116,7 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
             else:
                 #print("IS REVERSE")
                 s=scores[r_hedges_bytes_lower_index:r_endpoint_lower_index]
+                #s=scores[r_hedges_bytes_lower_index:]
                 if(s.size(0)==0 or s.size(0)<decoder._full_message_length): seq="N"
                 else:
                     #print("heges lower upper {} {}".format(r_hedes_bytes_lower_index,r_hedges_bytes_upper_index))

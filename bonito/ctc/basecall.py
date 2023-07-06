@@ -16,11 +16,18 @@ import pickle
 import sys
 import gc
 import os
+from itertools import islice
+
+
+
 
 def basecall(model, reads, beamsize=5, chunksize=0, overlap=0, batchsize=1, qscores=False, reverse=None,**kwargs):
     """
     Basecalls a set of reads.
     """
+    #lower_index=kwargs["lower_index"]
+    #upper_index=kwargs["upper_index"]
+    #reads=islice(reads,lower_index,upper_index) #slice out read set we want, makes job parallelization easier
     chunks = (
         (read, chunk(torch.tensor(read.signal), chunksize, overlap)) for read in reads
     )
@@ -30,6 +37,8 @@ def basecall(model, reads, beamsize=5, chunksize=0, overlap=0, batchsize=1, qsco
     scores = (
         (read, {'scores': stitch(v, chunksize, overlap, len(read.signal), model.stride)}) for read, v in scores
     )
+
+    
 
     if kwargs.get("hedges_params",None)!=None:
         alphabet=model.alphabet

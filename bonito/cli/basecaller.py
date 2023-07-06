@@ -107,7 +107,9 @@ def main(args):
         args.reads_directory, n_proc=8, recursive=args.recursive,
         read_ids=column_to_set(args.read_ids), skip=args.skip,
         do_trim=not args.no_trim, norm_params=model.config.get('normalisation'),
-        cancel=process_cancel()
+        cancel=process_cancel(),
+        lower_index=args.lower_index,
+        upper_index=args.upper_index
     )
 
     if args.max_reads:
@@ -222,4 +224,6 @@ def argparser():
     parser.add_argument("--window",action="store",type=int,default=0,help="window to use for ctc decoding")
     parser.add_argument("--trellis",action="store",type=str,default="base",help="trellis type to use")
     parser.add_argument("--mod_states",action="store",type=int,default=3,help="number of states per history")
+    parser.add_argument("--lower_index",action="store",type=int,default=0,help="Index to start for basecalling in the data set, INCLUSIVE")
+    parser.add_argument("--upper_index",action="store",type=int,default=10**9,help="Index to stop for basecalling, NOT_INCLUSIVE")
     return parser

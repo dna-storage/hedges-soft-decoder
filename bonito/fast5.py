@@ -155,7 +155,8 @@ def get_raw_data(filename, read_ids=None, skip=False):
                 yield Read(f5_fh.get_read(read_id), filename)
 
 
-def get_reads(directory, read_ids=None, skip=False, n_proc=1, recursive=False, cancel=None, do_trim=True, norm_params=None):
+def get_reads(directory, read_ids=None, skip=False, n_proc=1, recursive=False, cancel=None, do_trim=True, norm_params=None,
+              lower_index=None, upper_index=None):
     """
     Get all reads in a given `directory`.
     """
@@ -163,9 +164,14 @@ def get_reads(directory, read_ids=None, skip=False, n_proc=1, recursive=False, c
     get_filtered_reads = partial(get_read_ids, read_ids=read_ids, skip=skip)
     get_raw_data = partial(get_raw_data_for_read, do_trim=do_trim, norm_params=norm_params)
     reads = (Path(x) for x in glob(directory + "/" + pattern, recursive=True))
+    total_reads=0
     with Pool(n_proc) as pool:
         for job in chain(pool.imap(get_filtered_reads, reads)):
             for read in pool.imap(get_raw_data, job):
+                if total_reads<lower_index: 
+                    total_reads+=1
+                    continue
+                total_reads+=1
                 yield read
-                if cancel is not None and cancel.is_set():
+                if cancel is not None and cancel.is_set() or total_reads>=upper_index:
                     return
