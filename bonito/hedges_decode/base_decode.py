@@ -20,6 +20,8 @@ def torch_get_index_dtype(states)->torch.dtype:
         return torch.int32
 
 class HedgesBonitoBase:
+    get_new_F_kernel=cu.load_cupy_func("cuda/index_gather.cu","F_copy",FLOAT='float')
+
     """
     @brief      Base class for Hedges Bonito decoding
 
@@ -125,6 +127,29 @@ class HedgesBonitoBase:
             #print("{}:{}".format(indx,i),end=" ")
         
         return return_sequence[::-1]
+    
+
+    #helps transfer F scores more efficiently than re-arangement
+    def get_new_F(self,temp_f_outgoing:torch.Tensor,trellis_incoming_indexes:torch.Tensor,
+                  trellis_incoming_value:torch.Tensor,value_of_max_scores:torch.Tensor)->torch.Tensor:
+        assert torch.cuda.is_available() #make sure we have cuda for this class
+        return_F = torch.zeros((temp_f_outgoing.size(0),temp_f_outgoing.size(1)),device=self._device)
+        with cp.cuda.Device(0):  
+            #just paralellize over H for now, could parallelize time block transfers if wanted
+            h_per_block = 1024
+            H_blocks = (return_F.size(1)//h_per_block)+1
+            HedgesBonitoBase.get_new_F_kernel(grid=(H_blocks,1,1),block=(h_per_block,1,1),shared_mem=0,args=(temp_f_outgoing.data_ptr(),
+                                                                                                            trellis_incoming_indexes.to(self._device).data_ptr(),
+                                                                                                            trellis_incoming_value.to(self._device).data_ptr(),
+                                                                                                            value_of_max_scores.to(torch.int64).data_ptr().
+                                                                                                            return_F.data_ptr(),
+                                                                                                            return_F.size(1),
+                                                                                                            return_F.size(0),
+                                                                                                            trellis_incoming_indexes.size(1),
+                                                                                                            )
+            )
+                                                                                                                                  
+        return return_F
 
     #@profile
     def decode(self,scores:torch.Tensor,reverse:bool)->str:
@@ -233,28 +258,14 @@ class HedgesBonitoBase:
                 print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
 
 
+                #copy over F values
+                F = self.get_new_F(temp_f_outgoing,trellis_incoming_indexes,trellis_incoming_value,value_of_max_scores)  
 
-                #update forward arrays
-                incoming_F = temp_f_outgoing[:,trellis_incoming_indexes,trellis_incoming_value]
-                torch.cuda.synchronize()
-                print("\nincoming F")
-                print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
-                print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024))
-                print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
-
-
-                F = incoming_F[:,H_range,value_of_max_scores]
-                trellis_numpy=trellis_incoming_value.numpy()
-                
                 torch.cuda.synchronize()
                 print("\ncopy  F")
                 print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
                 print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024))
                 print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
-
-
-
-
 
                 print("\nend iter")
                 other_C.update_context(current_C,BT_index,trellis_numpy,i-sub_length,nbits)
@@ -349,13 +360,7 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
                     base = mod - sum([2**i for i in range(0,level)])
                     mod_from_prev_state = base>>1
                     prev_state = base&0x1
-                    #print("assfd")
-                    #print(mod)
-                    #print(level)
-                    #print(prev_state)
-                    #print(base)
                     mask[h,prev_state*self._mod+mod_from_prev_state]=1
-                #print(mask[h,:])
             l.append(mask.bool())
         return l
 
