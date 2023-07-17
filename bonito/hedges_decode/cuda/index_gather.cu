@@ -27,14 +27,19 @@ extern "C" __global__ void F_copy(
     long* __restrict__ value_of_max_scores,
     FLOAT* return_F,
     int H,
-    int T)   
+    int T,
+    int trellis_dim_1,
+    int E)   
 {
+    //h_index refers to return_F state we are working on
     int h_index = blockIdx.x*blockDim.x+threadIdx.x;
     if(h_index>=H) return;
     long max_index = value_of_max_scores[h_index];
-
-
-
-
+    long incoming_index = trellis_incoming_indexes[h_index*trellis_dim_1+max_index];
+    long incoming_value = trellis_incoming_value[h_index*trellis_dim_1+max_index];
+    //perform copy from outgoing to return F
+    for(int t=0; t<T, t++){
+        return_F[t*H+h_index] = temp_f_outgoing[t*H*E+incoming_index*E+trellis_incoming_value];
+    }
 }
 
