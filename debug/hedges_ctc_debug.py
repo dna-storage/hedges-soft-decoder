@@ -10,8 +10,8 @@ if __name__ =="__main__":
     b = bytes([204,0])
     endpoint_str="GGCGACAGAAGAGTCAAGGTTC"
     #quick debug of decoding
-    for read,scores in debug_data[::-1]:
+    for read,scores in debug_data:
         print("Decoding Read {}".format(read))
         print(scores.size())
-        x=hd.hedges_decode(read,{"scores":scores},sys.argv[2],b,False,alphabet,1,endpoint_str,window=0,trellis="base")
+        x=hd.hedges_decode(read,{"scores":scores},sys.argv[2],b,False,alphabet,1,endpoint_str,window=0.5,trellis="base")
         print(x['sequence'])

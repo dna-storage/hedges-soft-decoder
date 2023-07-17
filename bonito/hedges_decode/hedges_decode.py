@@ -50,9 +50,10 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
 
         @return     Dictionary with entries related to the output seqeunce
     """
-    #gc.collect()
-    #torch.cuda.empty_cache()
-    #torch.cuda.synchronize()
+
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.synchronize()
     start_time=time.time()
     try:
         with torch.no_grad():
@@ -69,10 +70,10 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
 
             if trellis=="base":
                 #basic trellis with base constraint information taken into account
-                decoder = HedgesBonitoBase(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet,"cuda:0","CTC",window=window)
+                decoder = HedgesBonitoBase(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet,"cuda:0","CTC",window=int(window))
             elif trellis=="mod":
                 #trellis that accounts for constraints by using the modulo state of contexts
-                decoder = HedgesBonitoDelayStates(hedges_params_dict,hedges_bytes,True,alphabet,"cuda:0","CTC",window=window,mod_states=mod_states)
+                decoder = HedgesBonitoDelayStates(hedges_params_dict,hedges_bytes,True,alphabet,"cuda:0","CTC",window=int(window),mod_states=mod_states)
             else:
                 raise ValueError("Trellis name error")
 
@@ -106,13 +107,11 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                 #print(" {} {}".format(f_endpoint_upper_index,f_hedges_bytes_upper_index))
                 s=s.flip([0])
                 complement_trellis=False
+                print("Score length {}".format(s.size(0)), file=sys.stderr)
                 if(s.size(0)==0 or s.size(0)<decoder._full_message_length): seq="N"
                 else:
-                    decode_start_time=time.time()
-                    #print("Time up to decode {}".format(decode_start_time-start_time))
+                    if window>0 and window<1: decoder.window=int(window*s.size(0)/2) 
                     seq = decoder.decode(s,complement_trellis)
-                    decode_end_time=time.time()
-                    #print("Time to decode {}".format(decode_end_time-decode_start_time))
             else:
                 #print("IS REVERSE")
                 s=scores[r_hedges_bytes_lower_index:r_endpoint_lower_index]
@@ -123,11 +122,9 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                     #print("{} {}".format(r_hedges_bytes_lower_index,r_endpoint_lower_index))
                     complement_trellis=True
                     decoder.fastforward_seq = complement(decoder.fastforward_seq)
-                    decode_start_time=time.time()
-                    #print("Time up to decode {}".format(decode_start_time-start_time))
+                    print("Score length {}".format(s.size(0)), file=sys.stderr)
+                    if window>0 and window<1: decoder.window=int(window*s.size(0)/2)
                     seq = decoder.decode(s,complement_trellis)
-                    decode_end_time=time.time()
-                    #print("Time to decode {}".format(decode_end_time-decode_start_time))
             #try to clean up memory
             return {'sequence':seq,'qstring':"*"*len(seq),'stride':stride,'moves':seq}
     except Exception as e:

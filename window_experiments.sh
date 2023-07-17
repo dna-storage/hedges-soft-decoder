@@ -1,13 +1,11 @@
 #!/bin/bash
 
-
-
 source /home/${USER}/.bashrc
 module unload cuda
 conda activate bonito_env
 
 
-window_size=(2000)
+window_size=(0.3 0.4 0.5 0.6 0.7 0.8 0.9 0.999)
 strand_fast5=("221118_dna_volkel_strand1_fast5_10k_subset" "221118_dna_volkel_strand2_fast5_10k_subset")
 strand_byte_index=(0 8)
 VERSION=""
@@ -22,8 +20,8 @@ do
 	real_strandId=$((strandId+1))
 	fast5_path=${strand_fast5[$strandId]}
 	byte_index=${strand_byte_index[$strandId]}
-	out_file="bonito_hedges_strand${real_strandId}_window--${window}.${VERSION}.fastq"
-	err_file="bonito_hedges_strand${real_strandId}_window--${window}.${VERSION}.err"
+	out_file="bonito_hedges_strand${real_strandId}_window--${window}.fastq"
+	err_file="bonito_hedges_strand${real_strandId}_window--${window}.err"
 	echo "--------------------------------------------------------------"
 	echo "Strand ID ${real_strandId}"
 	echo "Fast5 Path ${fast5_path}"

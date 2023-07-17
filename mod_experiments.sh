@@ -5,19 +5,19 @@ module unload cuda
 conda activate bonito_env
 
 
-window_size=0
-mods=(7)
+window_size=0.5
+mods=(15)
 strand_fast5=("221118_dna_volkel_strand1_fast5_10k_subset" "221118_dna_volkel_strand2_fast5_10k_subset")
-declare -a li_strand1=(3052 5552 8052)
-declare -a li_strand2=(3054 5552 8052)
+declare -a li_strand1=(0 2000 4000 6000 8000)
+declare -a li_strand2=(0 2000 4000 6000 8000)
 declare -a lower_indexes=("(${li_strand1[*]@Q})" "(${li_strand2[*]@Q})")
 
-declare -a ui_strand1=(5552 8052 10000)
-declare -a ui_strand2=(5552 8052 10000)
+declare -a ui_strand1=(2000 4000 6000 8000 10000)
+declare -a ui_strand2=(2000 4000 6000 8000 10000)
 declare -a upper_indexes=("(${ui_strand1[*]@Q})" "(${ui_strand2[*]@Q})")
 
 strand_byte_index=(0 8)
-GPU=p4000
+GPU=a4000
 
 echo "RUNNING mod experiments"
 for strandId in {0..1};

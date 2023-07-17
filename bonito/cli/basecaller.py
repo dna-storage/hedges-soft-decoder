@@ -221,7 +221,7 @@ def argparser():
     parser.add_argument("--strand_pad",action="store",default="",help="Optional padding strand that will be aligned to trim score endpoints")
     parser.add_argument("--disable_koi",default=False,action="store_true",help="Use this flag when using CTC-based model to avoid errors")
     parser.add_argument("--disable_half",action="store_true",default=False,help="Disables half precision on the model ")
-    parser.add_argument("--window",action="store",type=int,default=0,help="window to use for ctc decoding")
+    parser.add_argument("--window",action="store",type=float,default=0,help="window to use for ctc decoding")
     parser.add_argument("--trellis",action="store",type=str,default="base",help="trellis type to use")
     parser.add_argument("--mod_states",action="store",type=int,default=3,help="number of states per history")
     parser.add_argument("--lower_index",action="store",type=int,default=0,help="Index to start for basecalling in the data set, INCLUSIVE")

@@ -96,7 +96,7 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
         if self._window>0:
             scores_per_base = T/self._full_message_length
             strand_index = len(self._fastforward_seq)-1
-            lower_t_range=int(max(((strand_index)*scores_per_base)-self._window,strand_index))
+            lower_t_range=int(max(((strand_index)*scores_per_base)-self._window,0))
             upper_t_range=int(min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1))
             self._current_F_lower = lower_t_range
         else:
@@ -139,6 +139,7 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
         H,E,L_trans = base_transitions.size()
         using_window=False
         if self._window and self._window>0:
+            #print(self._window)
             using_window=True
             scores_per_base=torch.argmax(F[:,0],dim=0)+self._current_F_lower
             lower_t_range=int(max((scores_per_base)-self._window,strand_index+1-L_trans//2,self._current_F_lower+1))
@@ -148,7 +149,7 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
             targets = torch.concat([initial_bases[:,:,None],base_transitions],dim=2)
             _,_2,L = targets.size()
             targets=targets[None,:,:,:].expand(T_range,-1,-1,-1) #expand the targets along the time dimension
-            target_scores=torch.gather(scores[lower_t_range:upper_t_range,None,None,:].expand(-1,H,E,-1),3,targets)#gather in the scores for the targets    
+            target_scores=torch.gather(scores[lower_t_range:upper_t_range,None,None,:].expand(-1,H,E,-1),3,targets)#gather in the scores for the targets 
         else: #base, no window case
             lower_t_range=strand_index+1-L_trans//2
             upper_t_range=T-self._full_message_length+strand_index+1
