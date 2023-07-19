@@ -158,7 +158,6 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
             _,_2,L = targets.size()
             targets=targets[None,:,:,:].expand(T,-1,-1,-1) #expand the targets along the time dimension
             target_scores=torch.gather(scores[:,None,None,:].expand(-1,H,E,-1),3,targets)#gather in the scores for the targets 
-
         mask = torch.nn.functional.pad(targets[0,:,:,2:]==targets[0,:,:,:-2],(1,0),value=1)
         #calculate valid ranges of t to avoid unnecessary iterations
 

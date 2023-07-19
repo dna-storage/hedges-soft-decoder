@@ -132,23 +132,29 @@ class HedgesBonitoBase:
     #helps transfer F scores more efficiently than re-arangement
     def get_new_F(self,temp_f_outgoing:torch.Tensor,trellis_incoming_indexes:torch.Tensor,
                   trellis_incoming_value:torch.Tensor,value_of_max_scores:torch.Tensor)->torch.Tensor:
+        torch.cuda.synchronize(0)
         assert torch.cuda.is_available() #make sure we have cuda for this class
-        return_F = torch.zeros((temp_f_outgoing.size(0),temp_f_outgoing.size(1)),device=self._device)
+        return_F = torch.full((temp_f_outgoing.size(0),temp_f_outgoing.size(1)),0,device=self._device,dtype=torch.float)
         with cp.cuda.Device(0):  
             #just paralellize over H for now, could parallelize time block transfers if wanted
             h_per_block = 1024
             H_blocks = (return_F.size(1)//h_per_block)+1
+            trellis_incoming_indexes_gpu = trellis_incoming_indexes.to(self._device)
+            trellis_incoming_value_gpu = trellis_incoming_value.to(self._device)
+            max_vals = value_of_max_scores.contiguous()
             HedgesBonitoBase.get_new_F_kernel(grid=(H_blocks,1,1),block=(h_per_block,1,1),shared_mem=0,args=(temp_f_outgoing.data_ptr(),
-                                                                                                            trellis_incoming_indexes.to(self._device).data_ptr(),
-                                                                                                            trellis_incoming_value.to(self._device).data_ptr(),
-                                                                                                            value_of_max_scores.to(torch.int64).data_ptr().
+                                                                                                            trellis_incoming_indexes_gpu.data_ptr(),
+                                                                                                            trellis_incoming_value_gpu.data_ptr(),
+                                                                                                            max_vals.data_ptr(),
                                                                                                             return_F.data_ptr(),
                                                                                                             return_F.size(1),
                                                                                                             return_F.size(0),
                                                                                                             trellis_incoming_indexes.size(1),
-                                                                                                            )
+                                                                                                            temp_f_outgoing.size(2)
+                                                                                                         )
             )
-                                                                                                                                  
+
+        torch.cuda.synchronize(0)
         return return_F
 
     #@profile
@@ -187,11 +193,7 @@ class HedgesBonitoBase:
         accumulate_base_transition=torch.full((self._H,2**1,3*2),0,dtype=torch.int64)
         state_is_dead = torch.zeros((self._H),dtype=torch.uint8)
         for i in range(self._full_message_length-self._L,self._full_message_length):
-            print(i)
-            print("\nbeginning")
-            print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
-            print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024))
-            print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
+            #print(i)
             nbits = hedges_hooks.get_nbits(self._global_hedge_state_init,i)
             base_transition_outgoing=self.fill_base_transitions(self._H,2**nbits,current_C,nbits,reverse)
             pattern_range=pattern_counter*2
@@ -213,11 +215,7 @@ class HedgesBonitoBase:
                                                                                       accumulate_base_transition[:,:2**nbits,:pattern_range+2].to(self._device),
                                                                                       F,starting_bases.to(self._device),i,nbits)
                 
-                torch.cuda.synchronize()
-                print("\nafter fwd")
-                print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
-                print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024))
-                print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
+    
                 pattern_counter=0 #reset pattern counter
                 #get incoming bases and scores coming in to each state so that the best one can be selected
                 bases = base_transition_outgoing[trellis_incoming_indexes,trellis_incoming_value]#Hx2^n matrix of bases to add
@@ -226,12 +224,6 @@ class HedgesBonitoBase:
                 #masking allows us to effectively eliminate non-sensical scores for given contexts
                 if not mask is None:
                     state_scores = torch.where(mask.to(self._device).bool(),state_scores,state_scores.new_full(mask.size(),Log.zero))
-                torch.cuda.synchronize()
-                print("\nafter mask")
-                print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
-                print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024))
-                print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
-
 
                 m,value_of_max_scores= torch.max(state_scores,dim=1) # H-length vectror indicating location of best score
                 current_scores=state_scores.gather(1,value_of_max_scores[:,None])
@@ -240,38 +232,13 @@ class HedgesBonitoBase:
                     state_is_dead=(m<=Log.zero).to(torch.uint8).to("cpu")
 
 
-                torch.cuda.synchronize()
-                print("\nafter max")
-                print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
-                print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024))
-                print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
-
-
                 #update back trace matrices
                 BT_index[:,i-sub_length] = trellis_incoming_indexes[H_range,cpu_value_of_max_scores] #set the back trace index with best incoming state
                 BT_bases[:,i-sub_length] = bases[H_range,cpu_value_of_max_scores] #set base back trace matrix
-
-                torch.cuda.synchronize()
-                print("\nafter BT")
-                print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
-                print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024))
-                print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
-
-
                 #copy over F values
-                F = self.get_new_F(temp_f_outgoing,trellis_incoming_indexes,trellis_incoming_value,value_of_max_scores)  
-
-                torch.cuda.synchronize()
-                print("\ncopy  F")
-                print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
-                print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024))
-                print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
-
-                print("\nend iter")
+                F = self.get_new_F(temp_f_outgoing,trellis_incoming_indexes,trellis_incoming_value,value_of_max_scores) 
+                trellis_numpy=trellis_incoming_value.numpy()
                 other_C.update_context(current_C,BT_index,trellis_numpy,i-sub_length,nbits)
-                print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
-                print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024))
-                print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
             #swap contexts to make sure update happens properly
             t=current_C
             current_C=other_C
