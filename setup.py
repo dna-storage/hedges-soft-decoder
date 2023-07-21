@@ -33,6 +33,13 @@ extensions = [
               library_dirs=[os.path.join(os.getenv("CONDA_PREFIX","/"),"lib")],
               libraries=["hedges_hooks_c"],
               language="c++"
+              ),
+    Extension("bonito.hedges_decode.beam_viterbi",["bonito/hedges_decode/beam_viterbi/beam_viterbi.pyx"],
+              extra_compile_args=["-O3","-std=c++11"],
+              include_dirs=[os.path.join(os.getenv("CONDA_PREFIX","/"),"include")],
+              library_dirs=[os.path.join(os.getenv("CONDA_PREFIX","/"),"lib")],
+              libraries=["hedges_hooks_c"],
+              language="c++"
               )
 ]
 

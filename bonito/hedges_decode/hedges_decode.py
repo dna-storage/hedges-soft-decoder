@@ -66,7 +66,6 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
             except Exception as e:
                 print(e)
                 exit(1)
-                
 
             if trellis=="base":
                 #basic trellis with base constraint information taken into account
@@ -74,6 +73,9 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
             elif trellis=="mod":
                 #trellis that accounts for constraints by using the modulo state of contexts
                 decoder = HedgesBonitoDelayStates(hedges_params_dict,hedges_bytes,True,alphabet,"cuda:0","CTC",window=int(window),mod_states=mod_states)
+            elif "beam" in trellis:
+                #running beam trellis
+                decoder = HedgesBonitoBeam(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet,"cuda:0","CTC",trellis)
             else:
                 raise ValueError("Trellis name error")
 
@@ -102,7 +104,8 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
             #print("endpoint r score {}".format(r_endpoint_score))
             if Log.mul(f_hedges_score,f_endpoint_score)>Log.mul(r_endpoint_score,r_hedges_score):
                 #print("IS FORWARD")
-                s=scores[f_endpoint_upper_index:f_hedges_bytes_upper_index]
+                if decoder.is_beam: s=scores[f_endpoint_upper_index:f_hedges_bytes_lower_index]
+                else: s=scores[f_endpoint_upper_index:f_hedges_bytes_upper_index]
                 #s=scores[:f_hedges_bytes_upper_index]
                 #print(" {} {}".format(f_endpoint_upper_index,f_hedges_bytes_upper_index))
                 s=s.flip([0])
@@ -114,7 +117,8 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                     seq = decoder.decode(s,complement_trellis)
             else:
                 #print("IS REVERSE")
-                s=scores[r_hedges_bytes_lower_index:r_endpoint_lower_index]
+                if decoder.is_beam: s=scores[r_hedges_bytes_upper_index:r_endpoint_lower_index]
+                else: s=scores[r_hedges_bytes_lower_index:r_endpoint_lower_index]
                 #s=scores[r_hedges_bytes_lower_index:]
                 if(s.size(0)==0 or s.size(0)<decoder._full_message_length): seq="N"
                 else:

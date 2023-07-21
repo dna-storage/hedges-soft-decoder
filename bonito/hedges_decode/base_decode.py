@@ -8,6 +8,7 @@ from bonito.hedges_decode.context_utils import ContextManager
 import bonito.hedges_decode.context_utils as context_utils
 from .decode_ctc import *
 from .hedges_decode_utils import *
+from bonito.hedges_decode.beam_viterbi import run_beam_1
 
 
 def torch_get_index_dtype(states)->torch.dtype:
@@ -71,6 +72,13 @@ class HedgesBonitoBase:
     @window.setter
     def window(self,w):
         self._scorer._window=w
+
+    @property
+    def is_beam(self):
+        return False
+    
+
+
 
     def fill_base_transitions(self,H:int,transitions:int,C:ContextManager,nbits:int,reverse:bool)->np.ndarray:
         """
@@ -356,3 +364,22 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
     
 
 
+class HedgesBonitoBeam(HedgesBonitoBase):
+    @property
+    def is_beam(self):
+        return False
+    
+    def __init__(self, hedges_param_dict: dict, hedges_bytes: bytes, using_hedges_DNA_constraint: bool, 
+                 alphabet: list, device: str, score: str, beam: str = "beam_1") -> None:
+        super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet, device, score)
+        self._omp_threads = 32
+        self._list_size=1
+        self._beam = beam
+    def decode(self,scores:torch.Tensor,reverse:bool)->str:
+        scores_cpu = scores.to("cpu")
+        #launches beam viterbi decoding
+        out_seq = run_beam_1(int(math.log2(self._H)),self.get_initial_trellis_index(),self._L,self._list_size,
+                             scores_cpu.size(0),reverse,scores_cpu.data_ptr(),self._global_hedge_state_init,self._omp_threads) 
+        out_seq = self.fastforward_seq+out_seq
+        if reverse: out_seq=complement(out_seq)     
+        return out_seq
