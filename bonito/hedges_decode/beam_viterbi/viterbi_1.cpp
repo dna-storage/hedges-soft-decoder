@@ -22,6 +22,7 @@ so that an appropriate comparison of approaches can be made
 #include <unordered_set>
 #include <vector>
 #include "hedges_hooks_c.h"
+#include "viterbi_1.hpp"
 
 std::map<char,char> complement = {{'A','T'},
                                           {'T','A'},
@@ -30,12 +31,11 @@ std::map<char,char> complement = {{'A','T'},
 
 std::map<char,uint8_t> base2int = {{'A',0},{'C',1},{'G',2},{'T',3}};                                          
 
-
 const uint8_t NBASE = 4;
 const uint8_t NBIT_RANGE = 2; //range of total bits that can be transferred per base
 const char int2base[NBASE] = {'A', 'C', 'G', 'T'};
 
-
+uint32_t nstate_conv;
 
 typedef std::array<float, NBASE + 1> ctc_mat_t;
 // at each time step, we have probabilities for A,C,G,T,blank
@@ -129,9 +129,11 @@ float logsumexpf(float x, float y) {
 }
 
 
-std::vector<std::vector<bitset_t>> decode_post_conv_parallel_LVA(
-    const std::vector<ctc_mat_t> &post, const uint32_t msg_len,
+std::vector<bitset_t> decode_post_conv_parallel_LVA(
+    float* post, const uint32_t msg_len,
     const uint32_t list_size, const uint32_t num_thr,
+    const uint32_t post_T,
+    void* hedge_state,
     const uint32_t max_deviation);
 
 void write_bit_array(const std::vector<bool> &outvec,
@@ -175,7 +177,6 @@ std::vector<prev_state_info_t> find_prev_states(void* h,const uint32_t &st2_conv
 bool rc_flag = false;
 
 uint8_t mem_conv;
-uint32_t nstate_conv;
 uint32_t initial_state_conv;
 uint32_t nstate_pos;
 
@@ -217,7 +218,7 @@ std::vector<bitset_t> decode_post_conv_parallel_LVA(
     const uint32_t list_size, const uint32_t num_thr,
     const uint32_t post_T,
     void* hedge_state,
-    const uint32_t max_deviation) {
+    const uint32_t max_deviation)  {
   omp_set_num_threads(num_thr);
   float INF = std::numeric_limits<float>::infinity();
   uint64_t nstate_total_64 = nstate_pos * nstate_conv;
@@ -274,6 +275,7 @@ std::vector<bitset_t> decode_post_conv_parallel_LVA(
   // forward Viterbi pass
 
   for (uint32_t t = 0; t < nblk; t++) {
+    std::cout<<"Block index "<<t<<std::endl;
     // swap prev and curr arrays
     std::swap(curr_best_paths, prev_best_paths);
 
@@ -382,7 +384,7 @@ std::vector<bitset_t> decode_post_conv_parallel_LVA(
                 }
               }
               if (!match_found) {
-                candidate_paths.emplace_back(msg,new_score_nonblank,new_score_blank,new_base,false,msg_value,prev_best_paths[prev_st][i].context);
+                candidate_paths.emplace_back(msg,new_score_nonblank,new_score_blank,new_base,false,prev_best_paths[prev_st][i].context);
               }
             }
           }
