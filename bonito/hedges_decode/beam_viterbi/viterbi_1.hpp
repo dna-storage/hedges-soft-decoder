@@ -13,5 +13,6 @@ PyObject* beam_viterbi_1(
   bool rc, //flag for reverse complement
   float* ctc_data, //pointer to flattened data representing CTC matrix, organized as [T]
   PyObject* hedges_state_pointer,//pyobject that actually refers to a hedges state pointer which can derive necessary contexts
+  uint32_t offset,
   uint32_t omp_threads //number of threads to launch
 );

@@ -101,6 +101,7 @@ class HedgesBonitoBase:
         self._L = self._full_message_length - len(self._fastforward_seq)#length of message-length side of matrices
         self._alphabet = alphabet #alphabet we are using
         self._letter_to_index = {_:i for i,_ in enumerate(self._alphabet)} #reverse map for the alphabet
+        print(self._letter_to_index)
         self._trellis_connections=[]
         self._trellis_transition_values=[]
         self._max_bits=1 #max number of bits per base
@@ -367,19 +368,21 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
 class HedgesBonitoBeam(HedgesBonitoBase):
     @property
     def is_beam(self):
-        return False
+        return True
     
     def __init__(self, hedges_param_dict: dict, hedges_bytes: bytes, using_hedges_DNA_constraint: bool, 
                  alphabet: list, device: str, score: str, beam: str = "beam_1") -> None:
         super().__init__(hedges_param_dict, hedges_bytes, using_hedges_DNA_constraint, alphabet, device, score)
-        self._omp_threads = 32
+        self._omp_threads = 8
         self._list_size=1
         self._beam = beam
     def decode(self,scores:torch.Tensor,reverse:bool)->str:
         scores_cpu = scores.to("cpu")
         #launches beam viterbi decoding
-        out_seq = run_beam_1(int(math.log2(self._H)),self.get_initial_trellis_index(),self._L,self._list_size,
-                             scores_cpu.size(0),reverse,scores_cpu.data_ptr(),self._global_hedge_state_init,self._omp_threads) 
+        message_length = self._L
+        #message_length=300
+        out_seq = run_beam_1(int(math.log2(self._H)),self.get_initial_trellis_index(self._global_hedge_state_init),message_length,self._list_size,
+                             scores_cpu.size(0),reverse,scores_cpu.data_ptr(),self._global_hedge_state_init,self._full_message_length-self._L,self._omp_threads) 
         out_seq = self.fastforward_seq+out_seq
         if reverse: out_seq=complement(out_seq)     
         return out_seq

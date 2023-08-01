@@ -12,5 +12,6 @@ cdef extern from "viterbi_1.hpp":
         bool rc,
         float* ctc_data, 
         PyObject* hedges_state_pointer,
+	uint32_t offset,
         uint32_t omp_threads)
 

@@ -39,6 +39,7 @@ extensions = [
               include_dirs=[os.path.join(os.getenv("CONDA_PREFIX","/"),"include")],
               library_dirs=[os.path.join(os.getenv("CONDA_PREFIX","/"),"lib")],
               libraries=["hedges_hooks_c"],
+              undef_macros=['NDEBUG'],
               language="c++"
               )
 ]
