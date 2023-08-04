@@ -176,7 +176,7 @@ std::string bases_from_bits(std::bitset<N> b,uint32_t message_length){
     uint32_t bit2 = b[i-1];
     ret_string += int2base[bit1*2+bit2];
   }
-  std::cout<<"returning string "<<std::endl;
+  //std::cout<<"returning string "<<std::endl;
   return ret_string;
 }
 
@@ -288,7 +288,7 @@ std::vector<bitset_t> decode_post_conv_parallel_LVA(
 
   for (uint32_t t = 0; t < nblk; t++) {
     //if(t>=700) break;
-    std::cout<<std::dec<<"Block index "<<(int)t<<std::endl;
+    //std::cout<<std::dec<<"Block index "<<(int)t<<std::endl;
     // swap prev and curr arrays
     std::swap(curr_best_paths, prev_best_paths);
     // only allow pos which can have non -INF scores or will lead to useful

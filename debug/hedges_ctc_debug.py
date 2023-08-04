@@ -13,5 +13,6 @@ if __name__ =="__main__":
     for read,scores in debug_data:
         print("Decoding Read {}".format(read))
         print(scores.size())
-        x=hd.hedges_decode(read,{"scores":scores},sys.argv[2],b,False,alphabet,1,endpoint_str,window=500,trellis="beam_1")
+        x=hd.hedges_decode(read,{"scores":scores},sys.argv[2],b,False,alphabet,1,endpoint_str,window=0,trellis="mod",mod_states=15)
         print(x['sequence'])
+        

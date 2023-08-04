@@ -252,7 +252,7 @@ class HedgesBonitoBase:
             t=current_C
             current_C=other_C
             other_C=t
-        #print(current_scores)
+        print(current_scores)
         start_state = int(torch.argmax(current_scores))
         out_seq = self.fastforward_seq+self.string_from_backtrace(BT_index,BT_bases,start_state)
         if reverse: out_seq=complement(out_seq)     
