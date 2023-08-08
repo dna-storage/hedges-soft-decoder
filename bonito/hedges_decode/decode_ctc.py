@@ -122,7 +122,7 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
             F[t,self._initial_state_index] = running_alpha[-1]
         return F
 
-            
+    #@profile        
     def forward_step(self, scores: torch.Tensor, base_transitions: torch.Tensor, F: torch.Tensor, initial_bases:torch.Tensor, strand_index:int,
                      nbits:int) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -228,6 +228,7 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             r_2 = upper_t_range
             f_offset=int(-1)
             lower_t_range_offset=0
+            #print("scores size {}".format(scores.size(0)))
             y = torch.full((scores.size(0),H,E),Log.zero,device=device) #output pointer
         else:
             r_1 = 0
@@ -239,9 +240,11 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             #Need to break down L,H,E into block sizes <=1024
             #L can't be moved because of thread sync. dependency
             #1024/L = H*E
-            #E is typically small (at most 2 for now), so we can just do 1024//(L*E) for H threads per block
-            h_per_block = 1024//(L*E)
+            #E is typically small (at most 2 for now), so we cajust do 1024//(L*E) for H threads per block
+            max_T_per_block=128
+            h_per_block = max_T_per_block//(L*E)
             H_blocks = (H//h_per_block)+1
+            #print(H_blocks)
             HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,1,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,args=(targets.data_ptr(),scores.data_ptr(),y.data_ptr(),
                                                                                                                                    mask.data_ptr(),w.data_ptr(),r_1,r_2,
                                                                                                                                    H,E,L,2,1,f_offset,F.size(0),lower_t_range_offset))

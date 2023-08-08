@@ -7,6 +7,7 @@ import cython
 from libcpp cimport bool
 from cpython cimport PyLong_AsVoidPtr, PyDict_GetItem, PyLong_AsLong
 from libcpp.map cimport map
+from cython.parallel import prange
 
 DTYPE=np.int64
 ctypedef cnp.int64_t DTYPE_t
@@ -46,6 +47,7 @@ cdef class ContextManager:
        cdef int h
        cdef DTYPE_t value
        cdef DTYPE_t prev_state
+       
        for h in range(self._H):
            value = Vals[h,0]
            prev_state = BT[h,update_index]
@@ -59,7 +61,7 @@ cdef class ContextManager:
        cdef void** c1_array = c1._contexts
        cdef int h
        cdef DTYPE_t prev_state
-       for h in range(self._H):
+       for h in prange(self._H,nogil=True,num_threads=1):
            prev_state = BT[h,update_index]
            hedges_hooks_c.update_context__c(self._contexts[h],c1_array[prev_state],nbits,const_value)
 
@@ -72,7 +74,7 @@ def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool 
     cdef void* context
     cdef char next_base
     cdef int letter_index
-    for i in range(H):
+    for i in prange(H,nogil=True,num_threads=1):
         context = c._contexts[i]
         for j in range(n_edges):
             next_base = hedges_hooks_c.peek_context__c(context,nbits,j)
