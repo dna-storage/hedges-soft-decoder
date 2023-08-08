@@ -4,6 +4,8 @@
 #include <Python.h>
 #include <cstdint>
 
+
+
 PyObject* beam_viterbi_1(
   uint32_t conv_mem, //number of bits for convolutional code
   uint32_t initial_state, //initial state to start code at

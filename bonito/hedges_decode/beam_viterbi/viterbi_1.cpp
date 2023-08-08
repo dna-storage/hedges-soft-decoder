@@ -5,12 +5,10 @@ https://github.com/shubhamchandak94/nanopore_dna_storage
 Changes made to the original include fitting it to work with Hedges,
 so that an appropriate comparison of approaches can be made 
 */
-
 #include <Python.h>
 #include <omp.h>
 #include <algorithm>
 #include <array>
-#include <bitset>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -23,113 +21,33 @@ so that an appropriate comparison of approaches can be made
 #include <vector>
 #include "hedges_hooks_c.h"
 #include "viterbi_1.hpp"
+#include "viterbi.cuh"
 #include <assert.h>
+
+
+/*GLOBAL CONSTANTS*/
+__device__ __constant__  prev_state_info_t gpu_previus_states[MAX_NSTATE_CONV*TOTAL_PREVIOUS]; 
+__device__ __constant__  pattern_info_t gpu_pattern_vector;
+/*END GLOBAL CONSTANTS*/
+
+
+
 std::map<char,char> complement = {{'A','T'},
                                           {'T','A'},
                                           {'G','C'},
                                           {'C','G'}};
 
-std::map<char,uint8_t> base2int = {{'A',0},{'C',1},{'G',2},{'T',3}};                                          
 
-const uint8_t NBASE = 4;
-const uint8_t NBIT_RANGE = 2; //range of total bits that can be transferred per base
 const char int2base[NBASE] = {'A', 'C', 'G', 'T'};
 
+
+/*GLOBAL DEFS*/
 uint32_t nstate_conv;
-
-typedef std::array<float, NBASE + 1> ctc_mat_t;
-// at each time step, we have probabilities for A,C,G,T,blank
-// uint8_t base: 0->A, 1->C, 2->G, 3->T
-
-
-// for parallel LVA
-const uint32_t BITSET_SIZE = 2160*2;  // 32 bytes, TODO: KV: Need to set this size to work for HEDGES, make it so it is at least long enough to encode the message butwith bases
-typedef std::bitset<BITSET_SIZE> bitset_t;
-
-float logsumexpf(float x, float y);
-
-// this is the main stucture to store the top paths for each state
-struct LVA_path_t {
-  bitset_t msg; //KV:Note: Msg is now the DNA-message, not the binary message. helps analysis to be easier later
-  float score_nonblank; // score for path ending with non-blank base
-  float score_blank; // score for path ending with non-blank base
-  float score; // logsumexp(score_nonblank,score_blank), used for sorting
-  // If score is -INF, score_nonblank and score_blank can be garbage 
-  uint8_t last_base; // for computing updated score_nonblank for stay transition
-                     // and to compare with new_base in non-stay transitions 
-                     // for checking whether nonblank->nonblank makes sense
-  void* context; //for keeping track of contexts
-  bool is_stay=false; //keeps track on whether path being considered is a stay path, allows avoiding context update
-
-  LVA_path_t() {
-    float INF = std::numeric_limits<float>::infinity();
-    score_nonblank = -INF;
-    score_blank = -INF;
-    compute_score();
-    context=NULL;
-  }
-
-  LVA_path_t(const bitset_t &msg_, const float &score_nonblank_, 
-             const float &score_blank_, const uint8_t &last_base_,bool stay,void* context_) {
-    msg = msg_;
-    score_nonblank = score_nonblank_;
-    score_blank = score_blank_;
-    last_base = last_base_;
-    is_stay=stay;
-    context=context_; //copy context pointer, but don't really do anything with it yet.
-  }
-
-  // update score based on nonblank and blank score.
-  // NOTE: this must be called externally
-  void compute_score() {
-    score = logsumexpf(score_nonblank, score_blank);
-  }
-
-  //copies in a candidate's value and makes hedges context update
-  void copy_candidate(LVA_path_t& candidate, uint8_t nbits, uint8_t msg_value){
-    this->msg = candidate.msg;
-    this->score_nonblank=candidate.score_nonblank;
-    this->score_blank=candidate.score_blank;
-    this->score=candidate.score;
-    this->last_base=candidate.last_base;
-    assert(last_base>=0 && last_base<5);
-    if(nbits==0) assert(msg_value==0);
-    if(!candidate.is_stay)update_context__c(this->context,candidate.context,nbits,msg_value);
-    else copy_context_no_update__c(this->context,candidate.context); //copy candidate conext information without advancing
-    this->is_stay=false;
-  }
-};
-
-// struct for storing information about previous state for a current state and
-// the transition
-struct prev_state_info_t {
-  uint32_t st_conv;
-  uint32_t guess_value;
-};
-
-
-void write_bit_array(const std::vector<bool> &outvec,
-                     const std::string &outfile);
-
-
-template <class T>
-void write_vector(const std::vector<T> &outvec, const std::string &outfile) {
-  // write values in vector, one per line
-  std::ofstream fout(outfile);
-  for (auto v : outvec) {
-    fout << v << "\n";
-  }
-  fout.close();
-}
-
-float logsumexpf(float x, float y) {
-  float INF = std::numeric_limits<float>::infinity();
-  if (x == -INF && y == -INF)
-    return -INF; // the formula below returns nan
-  float max_x_y = std::max(x, y);
-  return max_x_y + logf(expf(x - max_x_y) + expf(y - max_x_y));
-}
-
+uint8_t mem_conv;
+uint32_t initial_state_conv;
+uint32_t nstate_pos;
+bool rc_flag = false;
+/*END GLOBAL DEFS*/
 
 std::vector<bitset_t> decode_post_conv_parallel_LVA(
     float* post, const uint32_t msg_len,
@@ -139,41 +57,14 @@ std::vector<bitset_t> decode_post_conv_parallel_LVA(
     uint32_t offset,
     const uint32_t max_deviation);
 
-void write_bit_array(const std::vector<bool> &outvec,
-                     const std::string &outfile) {
-  std::ofstream fout(outfile);
-  for (bool b : outvec) fout << (b ? '1' : '0');
-  fout.close();
-}
 
-void write_char_array(const std::vector<char> &vec,
-                      const std::string &outfile) {
-  std::ofstream fout(outfile);
-  for (char c : vec) fout << c;
-  fout.close();
-}
-
-
-uint32_t get_state_idx(const uint32_t st_pos, const uint32_t st_conv) {
-  return st_pos * nstate_conv + st_conv;
-}
-
-uint32_t get_post_idx(const uint32_t t, const uint32_t b) {
-  assert(b>=0 && b<5);
-  return t*(NBASE+1) + b;
-}
-
-
-template
-<uint32_t N>
-std::string bases_from_bits(std::bitset<N> b,uint32_t message_length){
+std::string bases_from_bits(bitset_t b,uint32_t message_length){
   std::string ret_string="";
   uint32_t bitset_index=0;
-  assert(N>=message_length*2);
   //assuming big endian in the bitset
-  for(int i=message_length*2-1; i>=1;i-=2){ //iterate in reverse because of bitset ordering
-    uint32_t bit1 = b[i];
-    uint32_t bit2 = b[i-1];
+  for(uint32_t i=message_length*2-1; i>=1;i-=2){ //iterate in reverse because of bitset ordering
+    uint8_t bit1 = b[i];
+    uint8_t bit2 = b[i-1];
     ret_string += int2base[bit1*2+bit2];
   }
   std::cout<<"returning string "<<std::endl;
@@ -181,13 +72,6 @@ std::string bases_from_bits(std::bitset<N> b,uint32_t message_length){
 }
 
 std::vector<prev_state_info_t> find_prev_states(void* h,const uint32_t &st2_conv,const uint8_t &nbits) ;
-
-
-bool rc_flag = false;
-
-uint8_t mem_conv;
-uint32_t initial_state_conv;
-uint32_t nstate_pos;
 
 PyObject* beam_viterbi_1(
   uint32_t conv_mem, //number of bits for convolutional code
@@ -215,9 +99,9 @@ PyObject* beam_viterbi_1(
                                                                                     omp_threads,
                                                                                     T,
                                                                                     hedges_head_state,
-								      offset,
+								                                                                    offset,
                                                                                     0); 
-  std::string return_string = bases_from_bits<BITSET_SIZE>(decode_result[0],message_length);
+  std::string return_string = bases_from_bits(decode_result[0],message_length);
 
   return Py_BuildValue("s",return_string.c_str());
 
@@ -230,67 +114,96 @@ std::vector<bitset_t> decode_post_conv_parallel_LVA(
     void* hedge_state,
     uint32_t offset,
     const uint32_t max_deviation)  {
-  omp_set_num_threads(num_thr);
-   float INF = std::numeric_limits<float>::infinity();
-  uint64_t nstate_total_64 = nstate_pos * nstate_conv;
-  if (nstate_total_64 >= ((uint64_t)1 << 32))
-    throw std::runtime_error("Too many states, can't fit in 32 bits");
-  uint32_t nstate_total = (uint32_t)nstate_total_64;
-  uint32_t nblk = post_T;
+  
+    omp_set_num_threads(num_thr);
+    uint64_t nstate_total_64 = nstate_pos * nstate_conv;
+    if (nstate_total_64 >= ((uint64_t)1 << 32)) throw std::runtime_error("Too many states, can't fit in 32 bits");
+    uint32_t nstate_total = (uint32_t)nstate_total_64;
+    uint32_t nblk = post_T;
 
 
   // instead of traceback, store the msg till now as a bitset
   if (msg_len*2 > BITSET_SIZE)
     throw std::runtime_error("msg_len can't be above BITSET_SIZE");
 
-  // arrays for storing previous and current best paths
-  // [nstate_total][list_size]
-  LVA_path_t **curr_best_paths = new LVA_path_t *[nstate_total];
-  LVA_path_t **prev_best_paths = new LVA_path_t *[nstate_total];
-  for (uint32_t i = 0; i < nstate_total; i++) {
-    curr_best_paths[i] = new LVA_path_t[list_size]();
-    prev_best_paths[i] = new LVA_path_t[list_size]();
-    //KV: make sure contexts are started up
-    for(uint32_t j=0; j<list_size; j++){
-      //need to create 2 contexts so that overwriting does not happen on state updates
-      curr_best_paths[i][j].context = make_context__c(hedge_state);
-      prev_best_paths[i][j].context = make_context__c(hedge_state);
-    }
+
+  //get pattern vector from HEDGES
+  std::vector<uint8_t> pattern = get_pattern__c(hedge_state);
+  assert(pattern.size()>0);
+  pattern_info_t pattern_info(pattern);
+
+  //make a prototype context to copy to every state object
+  std::vector<uint32_t> context_vect = get_context_data__c(hedge_state);
+  char* constraint_ptr;
+  get_constraint_data__c(hedge_state,(void**)&constraint_ptr);
+  context proto_context(context_vect,(void*)constraint_ptr);
+  free(constraint_ptr);
+  assert(list_size<=MAX_LIST_SIZE);
+
+  LVA_path_t_SOA curr_best_paths(nstate_total*list_size,true);
+  LVA_path_t_SOA prev_best_paths(nstate_total*list_size,true);
+  curr_best_paths.set_context(proto_context);
+  prev_best_paths.set_context(proto_context);
+
+
+// precompute the previous states and associated info for all states now
+// note that this is valid only for st_pos > 0 (if st_pos = 0, only previous
+// state allowed is same state - which is always first entry in the
+// prev_state_vector)
+
+// KV NOTE: flatten this to an array so it can be passed off to the GPU easier
+GPU_CONST_CHECK((TOTAL_PREVIOUS*nstate_conv));
+prev_state_info_t* prev_state_flat_vector = new prev_state_info_t[TOTAL_PREVIOUS*nstate_conv];
+for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
+  uint32_t nbit_start_index  = (1ULL<nbits)-1;
+  #pragma omp parallel
+  #pragma omp for
+  for (uint32_t st_conv = 0; st_conv < nstate_conv; st_conv++){
+      std::vector<prev_state_info_t> p = find_prev_states(hedge_state,st_conv, nbits);
+      uint32_t previous_offset=0;
+      for (auto& previous:p){
+        uint32_t previous_index = nbit_start_index+previous_offset;
+        prev_state_flat_vector[st_conv*TOTAL_PREVIOUS+previous_index]=previous;
+      }
   }
-
-  // lambda expression to compare paths (decreasing in score)
-  auto LVA_path_t_compare = [](const LVA_path_t &a, const LVA_path_t &b) {
-                              return a.score > b.score;
-                            };
-
-
-  // precompute the previous states and associated info for all states now
-  // note that this is valid only for st_pos > 0 (if st_pos = 0, only previous
-  // state allowed is same state - which is always first entry in the
-  // prev_state_vector)
-  std::vector<std::vector<std::vector<prev_state_info_t>>> prev_state_vector(NBIT_RANGE);
-#pragma omp parallel
-#pragma omp for
-  for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
-    prev_state_vector[nbits].resize(nstate_conv);
-    for (uint32_t st_conv = 0; st_conv < nstate_conv; st_conv++)
-        prev_state_vector[nbits][st_conv] =
-            find_prev_states(hedge_state,st_conv, nbits);
-  }
+}
 
   // set score_blank to zero for initial state
-  uint32_t initial_st = get_state_idx(0, initial_state_conv);
-  curr_best_paths[initial_st][0].score_blank = 0.0;
-  curr_best_paths[initial_st][0].score_nonblank = -INF;
-  curr_best_paths[initial_st][0].last_base=0;
-  curr_best_paths[initial_st][0].compute_score();
-  // forward Viterbi pass
+  uint32_t initial_st = get_state_idx(0, initial_state_conv,0);
+  curr_best_paths.score_blank[initial_st] = 0.0;
+  curr_best_paths.score_nonblank[initial_st] = ZERO;
+  curr_best_paths.last_base[initial_st]=0;
+  curr_best_paths.compute_score_cpu(initial_st);
 
+
+  //Move initialized trellis states to GPU 
+  LVA_path_t_SOA gpu_curr_best_paths(nstate_total*list_size,false);
+  LVA_path_t_SOA gpu_prev_best_paths(nstate_total*list_size,false);
+  LVA_candidate_t_SOA candidate_paths(nstate_total*MAX_CANDIDATES,false);
+  host_to_dev(curr_best_paths,gpu_curr_best_paths);
+  host_to_dev(prev_best_paths,gpu_prev_best_paths);
+  //copy prev_state_vector and pattern information into constant memory
+  cudaMemcpyToSymbol("gpu_previous_states", (void*)prev_state_flat_vector, TOTAL_PREVIOUS*nstate_conv*sizeof(prev_state_info_t));
+  cudaMemcpyToSymbol("gpu_pattern_vector", (void*)&pattern_info, sizeof(pattern_info_t));
+
+
+  //kernel argument loading
+  kernel_values_t kernel_args;
+  kernel_args.nstate_conv=nstate_conv;
+  kernel_args.nstate_pos=nstate_pos;
+  kernel_args.nlist_pos=list_size;
+  kernel_args.post=post;
+  kernel_args.post_T = post_T;
+  kernel_args.post_NB = NBASE;
+  kernel_args.curr_best_paths=gpu_curr_best_paths;
+  kernel_args.prev_best_paths=gpu_curr_best_paths;
+  kernel_args.candidate_paths=candidate_paths;
+
+  // forward Viterbi pass
   for (uint32_t t = 0; t < nblk; t++) {
-    //if(t>=700) break;
     std::cout<<std::dec<<"Block index "<<(int)t<<std::endl;
     // swap prev and curr arrays
-    std::swap(curr_best_paths, prev_best_paths);
+    std::swap(kernel_args.curr_best_paths, kernel_args.prev_best_paths);
     // only allow pos which can have non -INF scores or will lead to useful
     // final states initially large pos is not allowed, and at the end small
     // pos not allowed (since those can't lead to correct st_pos at the end).
@@ -301,153 +214,55 @@ std::vector<bitset_t> decode_post_conv_parallel_LVA(
         std::max((int64_t)nstate_pos  - (nblk - t), (int64_t)0);
     uint32_t st_pos_end = std::min(t+2, nstate_pos);
 
-    /* KV: NOTE: Removed this, seems to be a heuristic that limits numbers of calculations
-    st_pos_start = std::max(
-        (int64_t)st_pos_start, (int64_t)((double)(t) / nblk * nstate_pos - max_deviation));
-    st_pos_end = std::min(st_pos_start + 2 * max_deviation, st_pos_end);
-    */
+    kernel_args.start_pos=st_pos_start;
+    kernel_args.end_pos=st_pos_end;
 
-#pragma omp parallel
-#pragma omp for schedule(dynamic)
-    for (uint32_t st_pos = st_pos_start; st_pos < st_pos_end; st_pos++) { 
-      // vector containing the candidate items for next step list
-      std::vector<LVA_path_t> candidate_paths;
-      //std::cout<<"St pos "<<st_pos<<std::endl;
-      for (uint32_t st_conv = 0; st_conv < nstate_conv; st_conv++) {
-        // check if this is a valid state, otherwise continue
-        //if (!valid_state_array[nstate_conv * st_pos + st_conv]) continue;
-
-        // clear candidate_paths
-        candidate_paths.clear();
-
-        // first do stay transition
-        uint32_t st = get_state_idx(st_pos, st_conv);
-        uint32_t num_stay_candidates = 0;
-        for (uint32_t i = 0; i < list_size; i++) {
-          if (prev_best_paths[st][i].score == -INF)
-            break;
-          num_stay_candidates++;
-          float new_score_blank = logsumexpf(prev_best_paths[st][i].score_blank + post[get_post_idx(t,0)], 
-					     prev_best_paths[st][i].score_nonblank + post[get_post_idx(t,0)]);
-          float new_score_nonblank = prev_best_paths[st][i].score_nonblank +
-	    post[get_post_idx(t,prev_best_paths[st][i].last_base)];
-          candidate_paths.emplace_back(prev_best_paths[st][i].msg,new_score_nonblank,
-                                       new_score_blank,prev_best_paths[st][i].last_base,true,prev_best_paths[st][i].context);
-        }
-	
-
-	uint8_t nbits=0;
-	uint8_t msg_value=0;
-       
-        // Now go through non-stay transitions.
-        // For each case, first look in the stay transitions to check if the msg has
-        // already appeared before
-        // start with psidx = 1, since 0 corresponds to stay (already done above)
-        if (st_pos != 0) { // otherwise only stay transition makes sense
-	  nbits = get_nbits__c(hedge_state,st_pos+offset-1); //KV: this needs to ask hedges what the nbits is for this length
-	  const auto &prev_states_st = prev_state_vector[nbits][st_conv];
-	  msg_value = prev_states_st[0].guess_value; //Moved msg_value here, should be the same for all incoming states 
-	  //std::cout<<std::dec<<"Nbits "<<(int)nbits<<" Value "<<(int)msg_value<<std::endl;
-	  for (uint32_t psidx = 0; psidx < prev_states_st.size(); psidx++) {
-            uint32_t prev_st_pos = st_pos - 1;
-            uint32_t prev_st = get_state_idx(prev_st_pos, prev_states_st[psidx].st_conv);
-            for (uint32_t i = 0; i < list_size; i++) {
-              if (prev_best_paths[prev_st][i].score == -INF) break;
-              //KV: NOTE: new_base will be fully determined only once we look at each previous candidate
-              char new_base = peek_context__c(prev_best_paths[prev_st][i].context,nbits,msg_value);
-              if(rc_flag) new_base= complement[new_base]; //make sure to complement HEDGES output if necessary
-	      assert(get_index__c(prev_best_paths[prev_st][i].context)==prev_st_pos+offset);
-	      
-              //KV: NOTE: I'm making msg the base message instead of bits message
-              bitset_t msg = prev_best_paths[prev_st][i].msg;
-              uint8_t msg_newbits = base2int[new_base];
-	      
-              msg = (msg << 2) | bitset_t(msg_newbits);
-              float new_score_blank = -INF;
-              float new_score_nonblank = -INF;
-              if (msg_newbits != prev_best_paths[prev_st][i].last_base) {
-                new_score_nonblank = 
-		  logsumexpf(prev_best_paths[prev_st][i].score_blank + post[get_post_idx(t,msg_newbits+1)],
-                             prev_best_paths[prev_st][i].score_nonblank + post[get_post_idx(t,msg_newbits+1)]);
-              } else {
-                // the newly added base is same as last base so we can't have the 
-                // thing ending with non_blank (otherwise it gets collapsed)
-                new_score_nonblank = prev_best_paths[prev_st][i].score_blank + post[get_post_idx(t,msg_newbits+1)];
-              }
-              if (new_score_nonblank == -INF)
-              {
-                continue;
-                // overall score is -INF (this might happen if 
-                // score_blank for previous path is -INF and we are
-                // in second case above) 
-              }
-
-              // now check if this is already present in the stay transitions.
-              // first try to match the new_base for speed, then look at full msg.
-              // if already present, update the nonblank score
-              bool match_found = false;
-              for (uint32_t j = 0; j < num_stay_candidates; j++) {
-                if (msg_newbits == candidate_paths[j].last_base) {
-                  if (msg == candidate_paths[j].msg) {
-                    match_found = true;
-                    candidate_paths[j].score_nonblank = 
-                            logsumexpf(candidate_paths[j].score_nonblank,new_score_nonblank);
-                    break;
-                  }
-                }
-              }
-              if (!match_found) {
-                candidate_paths.emplace_back(msg,new_score_nonblank,new_score_blank,msg_newbits+1,false,prev_best_paths[prev_st][i].context);
-              }
-            }
-          }
-        }
-       
-        uint32_t num_candidates = candidate_paths.size();
-	//std::cout<<"N candidates "<<num_candidates<<std::endl;
-        // update scores based on score_blank and score_nonblank
-        for (uint32_t i = 0; i < num_candidates; i++)
-           candidate_paths[i].compute_score();
-
-        auto num_candidates_to_keep = std::min(list_size, num_candidates);
-        // use nth_element to to do partial sorting if num_candidates_to_keep < num_candidates
-        if (num_candidates_to_keep < num_candidates && num_candidates_to_keep > 0)
-          std::nth_element(candidate_paths.begin(),
-                           candidate_paths.begin()+num_candidates_to_keep-1,
-                           candidate_paths.end(),
-                           LVA_path_t_compare);
-        
-        //KV: TODO: Candidate paths cannot simply be copied into the curr_best_paths set
-        //The reason is that the candidates don't "own" their pointer to the context, its just copied from previous states
-        //we cannot directly update the previous state context, else there may be a conflict if it is inherited in several places
-        //thus, we need to copy candidate by candidate more carefully
-        for(int candidate_iter = 0; candidate_iter<num_candidates_to_keep;candidate_iter++){
-          curr_best_paths[st][candidate_iter].copy_candidate(candidate_paths[candidate_iter],nbits,msg_value);
-        }
-
-        // fill any remaining positions in list with score -INF so they are not used later
-        for (uint32_t i = num_candidates_to_keep; i < list_size; i++)
-          curr_best_paths[st][i].score = -INF;
-      }
-    }
+    //call kernel to calculate updated trellis
+    call_beam_kernel_1(kernel_args);
+    cudaDeviceSynchronize();
   }
 
+  //transfer back to host and free gpu memory
+  dev_to_host(curr_best_paths,gpu_curr_best_paths);
+  dev_to_host(prev_best_paths,gpu_prev_best_paths);
+  gpu_prev_best_paths.free();
+  gpu_curr_best_paths.free();
+  candidate_paths.free();
+  prev_best_paths.free();
+
+
+  //reframe the SOA to an AOS to make data better for CPU
+  LVA_path_t* curr_best_paths_AOS = new LVA_path_t[nstate_total*list_size];
+  curr_best_paths.to_AOS(curr_best_paths_AOS,nstate_total*list_size);
+  curr_best_paths.free();
+
+  static auto LVA_path_t_compare = [](const LVA_path_t &a, const LVA_path_t &b) {
+                              return a.score > b.score;
+                            };
+
+  //consider the best state at the end of the trellis
   uint32_t st_pos = nstate_pos - 1;  
   std::vector<LVA_path_t> final_path_set;
   for(int i=0; i<nstate_conv;i++){
-    uint32_t st_idx = get_state_idx(st_pos,i);
-    LVA_path_t* conv_paths = curr_best_paths[st_idx];
-    std::sort(conv_paths,conv_paths+list_size,LVA_path_t_compare);
+    std::vector<LVA_path_t> conv_paths;
+    for(int j=0; j<list_size;j++){
+      uint32_t st_idx = get_state_idx(st_pos,i,j); //need to account for list positions not being addressed next to each other
+      conv_paths.push_back(curr_best_paths_AOS[st_idx]);
+    }
+    std::sort(conv_paths.begin(),conv_paths.begin()+list_size,LVA_path_t_compare);
     final_path_set.push_back(conv_paths[0]);
   }
   
   uint32_t st_conv = std::min_element(final_path_set.begin(),final_path_set.end(),LVA_path_t_compare)-final_path_set.begin();
 
-  LVA_path_t *LVA_path_list_final = curr_best_paths[get_state_idx(st_pos, st_conv)];
+
+  std::vector<LVA_path_t> LVA_path_list_final;
+  for(int i=0; i<list_size; i++) LVA_path_list_final.push_back(curr_best_paths_AOS[get_state_idx(st_pos, st_conv,i)]);
+
 
   // sort in decreasing order by score 
   // NOTE: the curr_best_paths list is not sorted since we use nth_element partial sorting
-  std::sort(LVA_path_list_final, LVA_path_list_final+list_size, LVA_path_t_compare);
+  std::sort(LVA_path_list_final.begin(), LVA_path_list_final.end(), LVA_path_t_compare);
 
   std::vector<bitset_t> decoded_msg_list;
 
@@ -458,13 +273,7 @@ std::vector<bitset_t> decode_post_conv_parallel_LVA(
         //for (auto b : decoded_msg_list.back()) std::cout << b;
         std::cout << "\n\n";
   }
-
-  for (uint32_t i = 0; i < nstate_total; i++) {
-    delete[] curr_best_paths[i];
-    delete[] prev_best_paths[i];
-  }
-  delete[] curr_best_paths;
-  delete[] prev_best_paths;
+  delete[] curr_best_paths_AOS;
   return decoded_msg_list;
 }
 

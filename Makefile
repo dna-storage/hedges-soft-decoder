@@ -58,3 +58,7 @@ deb: clean
         # package everything up
 	(cd tmp; fakeroot dpkg -b . ../$(PACKAGE)_$(MAJOR).$(MINOR).$(SUB)-$(PATCH).deb)
 	rm -rf tmp
+
+develop: 
+	$(MAKE) -C bonito/hedges_decode/beam_viterbi
+	python setup.py develop

@@ -25,7 +25,8 @@ with open('README.md', encoding='utf-8') as f:
     long_description = f.read()
 
 
-
+project_path = os.path.dirname(__file__)
+print(os.path.join(project_path,"bonito/hedges_decode/beam_viterbi"))
 extensions = [
     Extension("bonito.hedges_decode.context_utils",["bonito/hedges_decode/context_utils/context.pyx"],
               extra_compile_args=["-O3","-std=c++11"],
@@ -34,11 +35,12 @@ extensions = [
               libraries=["hedges_hooks_c"],
               language="c++"
               ),
-    Extension("bonito.hedges_decode.beam_viterbi",["bonito/hedges_decode/beam_viterbi/beam_viterbi.pyx","bonito/hedges_decode/beam_viterbi/viterbi_1.cpp"],
+    Extension("bonito.hedges_decode.beam_viterbi",["bonito/hedges_decode/beam_viterbi/beam_viterbi.pyx"],
               extra_compile_args=["-O3","-std=c++11"],
               include_dirs=[os.path.join(os.getenv("CONDA_PREFIX","/"),"include")],
-              library_dirs=[os.path.join(os.getenv("CONDA_PREFIX","/"),"lib")],
-              libraries=["hedges_hooks_c"],
+              runtime_library_dirs=[os.path.join(project_path,"bonito/hedges_decode/beam_viterbi")],
+              library_dirs=[os.path.join(os.getenv("CONDA_PREFIX","/"),"lib"),os.path.join(project_path,"bonito/hedges_decode/beam_viterbi")],
+              libraries=["hedges_hooks_c","beam_cuda"],
               undef_macros=['NDEBUG'],
               language="c++"
               )
