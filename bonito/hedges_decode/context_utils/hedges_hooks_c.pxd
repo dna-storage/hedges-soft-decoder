@@ -1,9 +1,9 @@
 from cpython.ref cimport PyObject
 
 cdef extern from "hedges_hooks_c.h":
-    void update_context__c(void* c1, void* c2, int nbits, int value)
+    void update_context__c(void* c1, void* c2, int nbits, int value) nogil except +
 
-    char peek_context__c(void* c1, int nbits, int value)
+    char peek_context__c(void* c1, int nbits, int value) nogil except +
 
     void* make_hedge__c(PyObject* h)
 

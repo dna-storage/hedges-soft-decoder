@@ -67,7 +67,7 @@ std::string bases_from_bits(bitset_t b,uint32_t message_length){
     uint8_t bit2 = b[i-1];
     ret_string += int2base[bit1*2+bit2];
   }
-  std::cout<<"returning string "<<std::endl;
+  //std::cout<<"returning string "<<std::endl;
   return ret_string;
 }
 

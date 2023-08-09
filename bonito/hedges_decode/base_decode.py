@@ -89,7 +89,6 @@ class HedgesBonitoBase:
         @return     None
         """
         return context_utils.fill_base_transitions(H,transitions,C,nbits,reverse)
-
     def __init__(self,hedges_param_dict:dict,hedges_bytes:bytes,using_hedges_DNA_constraint:bool,alphabet:list,device:str,
                  score:str,window:int=0) -> None:
         
@@ -141,17 +140,23 @@ class HedgesBonitoBase:
     #helps transfer F scores more efficiently than re-arangement
     def get_new_F(self,temp_f_outgoing:torch.Tensor,trellis_incoming_indexes:torch.Tensor,
                   trellis_incoming_value:torch.Tensor,value_of_max_scores:torch.Tensor)->torch.Tensor:
-        torch.cuda.synchronize(0)
+        #torch.cuda.synchronize(0)
         assert torch.cuda.is_available() #make sure we have cuda for this class
         return_F = torch.full((temp_f_outgoing.size(0),temp_f_outgoing.size(1)),0,device=self._device,dtype=torch.float)
         with cp.cuda.Device(0):  
             #just paralellize over H for now, could parallelize time block transfers if wanted
-            h_per_block = 1024
-            H_blocks = (return_F.size(1)//h_per_block)+1
+            T = return_F.size(0)
+            #h_per_block = 1024
+            h_per_block = 256
+            t_per_block = 4
+            #H_blocks = (return_F.size(1)//h_per_block)+1
+            H_blocks=return_F.size(1)//h_per_block
+            T_blocks = (return_F.size(0)//t_per_block)
+            if return_F.size(0)%t_per_block!=0: T_blocks+=1
             trellis_incoming_indexes_gpu = trellis_incoming_indexes.to(self._device)
             trellis_incoming_value_gpu = trellis_incoming_value.to(self._device)
             max_vals = value_of_max_scores.contiguous()
-            HedgesBonitoBase.get_new_F_kernel(grid=(H_blocks,1,1),block=(h_per_block,1,1),shared_mem=0,args=(temp_f_outgoing.data_ptr(),
+            HedgesBonitoBase.get_new_F_kernel(grid=(H_blocks,T_blocks,1),block=(h_per_block,t_per_block,1),shared_mem=0,args=(temp_f_outgoing.data_ptr(),
                                                                                                             trellis_incoming_indexes_gpu.data_ptr(),
                                                                                                             trellis_incoming_value_gpu.data_ptr(),
                                                                                                             max_vals.data_ptr(),
@@ -163,7 +168,7 @@ class HedgesBonitoBase:
                                                                                                          )
             )
 
-        torch.cuda.synchronize(0)
+        #torch.cuda.synchronize(0)
         return return_F
 
     #@profile
@@ -224,7 +229,7 @@ class HedgesBonitoBase:
                                                                                       accumulate_base_transition[:,:2**nbits,:pattern_range+2].to(self._device),
                                                                                       F,starting_bases.to(self._device),i,nbits)
                 
-    
+                #torch.cuda.synchronize()
                 pattern_counter=0 #reset pattern counter
                 #get incoming bases and scores coming in to each state so that the best one can be selected
                 bases = base_transition_outgoing[trellis_incoming_indexes,trellis_incoming_value]#Hx2^n matrix of bases to add
@@ -252,7 +257,7 @@ class HedgesBonitoBase:
             t=current_C
             current_C=other_C
             other_C=t
-        #print(current_scores)
+        print(current_scores)
         start_state = int(torch.argmax(current_scores))
         out_seq = self.fastforward_seq+self.string_from_backtrace(BT_index,BT_bases,start_state)
         if reverse: out_seq=complement(out_seq)     

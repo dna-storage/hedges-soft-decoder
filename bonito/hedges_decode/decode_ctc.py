@@ -122,7 +122,7 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
             F[t,self._initial_state_index] = running_alpha[-1]
         return F
 
-            
+    #@profile        
     def forward_step(self, scores: torch.Tensor, base_transitions: torch.Tensor, F: torch.Tensor, initial_bases:torch.Tensor, strand_index:int,
                      nbits:int) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -148,22 +148,18 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
             #need to create a Hx2^nbitsxL tensor to represent all strings we are calculating alphas for var in collection:
             targets = torch.concat([initial_bases[:,:,None],base_transitions],dim=2)
             _,_2,L = targets.size()
-            targets=targets[None,:,:,:].expand(T_range,-1,-1,-1) #expand the targets along the time dimension
-            target_scores=torch.gather(scores[lower_t_range:upper_t_range,None,None,:].expand(-1,H,E,-1),3,targets)#gather in the scores for the targets 
         else: #base, no window case
             lower_t_range=strand_index+1-L_trans//2
             upper_t_range=T-self._full_message_length+strand_index+1
             #need to create a Hx2^nbitsxL tensor to represent all strings we are calculating alphas for var in collection:
             targets = torch.concat([initial_bases[:,:,None],base_transitions],dim=2)
             _,_2,L = targets.size()
-            targets=targets[None,:,:,:].expand(T,-1,-1,-1) #expand the targets along the time dimension
-            target_scores=torch.gather(scores[:,None,None,:].expand(-1,H,E,-1),3,targets)#gather in the scores for the targets 
-        mask = torch.nn.functional.pad(targets[0,:,:,2:]==targets[0,:,:,:-2],(1,0),value=1)
+        mask = torch.nn.functional.pad(targets[:,:,2:]==targets[:,:,:-2],(1,0),value=1)
         #calculate valid ranges of t to avoid unnecessary iterations
-
-        alpha_t = self._fwd_algorithm(target_scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,lower_t_range-self._current_F_lower)
+        alpha_t = self._fwd_algorithm(targets,scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,lower_t_range-self._current_F_lower)
         if PLOT and strand_index==(864+48): plot_scores(alpha_t,lower_t_range,upper_t_range,True,plot_list=[0])
-        out_scores=self._dot_product(target_scores,alpha_t)
+        out_scores=self._dot_product(targets,scores,lower_t_range,upper_t_range,alpha_t,using_window)
+        #print(torch.max(out_scores))
         self._current_F_lower=lower_t_range #keeps track of most recent lower_t_range
         return out_scores,alpha_t
 
@@ -180,8 +176,14 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
         assert torch.cuda.is_available() #make sure we have cuda for this class
 
     @classmethod
-    def _dot_product(cls,target_scores,alpha_t,strand_index=0)->torch.Tensor:
-        T,H,E,L = target_scores.size()
+    def _dot_product(cls,targets,scores,lower_t_range,upper_t_range,alpha_t,using_window,strand_index=0)->torch.Tensor:
+        H,E,L = targets.size()
+        if using_window: 
+            t_range_offset=lower_t_range
+            T=upper_t_range-lower_t_range
+        else:
+            T=scores.size(0)
+            t_range_offset=0
         z = alpha_t.new_zeros((T,H,E))
         with cp.cuda.Device(0):
             #With bigger H, blocking needs to be reformulated
@@ -194,8 +196,7 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             assert H%h_per_block==0 #this should divide evenly
             total_h_blocks = (H//h_per_block) 
             #perform multiplication of dot product
-            HedgesBonitoCTCGPU.dot_mul_kernel(grid=(total_t_blocks,total_h_blocks,1),block=(E,h_per_block,t_per_block),shared_mem = 0, args=(target_scores.data_ptr(),alpha_t.data_ptr(),
-                                                                                                                                             z.data_ptr(),T,L,H,E))
+            HedgesBonitoCTCGPU.dot_mul_kernel(grid=(total_t_blocks,total_h_blocks,1),block=(E,h_per_block,t_per_block),shared_mem = 0, args=(targets.data_ptr(),scores.data_ptr(),alpha_t.data_ptr(),z.data_ptr(),T,L,H,E,t_range_offset))
             #We can make this more efficient by reducing the number of dead threads
             stride=1 # this indicates where to find the next valid time value for reduction
             while True:
@@ -214,12 +215,11 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
         return z[0,:,:]
     
     @classmethod
-    def _fwd_algorithm(cls, target_scores: torch.Tensor,mask: torch.Tensor,
+    def _fwd_algorithm(cls, targets: torch.Tensor,scores: torch.Tensor, mask: torch.Tensor,
                        F: torch.Tensor, lower_t_range: int, upper_t_range: int,device,
                        using_window,pad)->torch.Tensor:
-        T,H,E,L=target_scores.size()
+        H,E,L=targets.size()
         L-=1
-        y = torch.full((T,H,E),Log.zero,device=device)
         #convert mask from bools to floats to avoid control flow in GPU kernel
         mask = torch.where(mask,torch.full(mask.size(),Log.zero,device=device),torch.full(mask.size(),Log.one,device=device))
         w=F.to(device)
@@ -227,21 +227,27 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             r_1 = lower_t_range
             r_2 = upper_t_range
             f_offset=int(-1)
+            lower_t_range_offset=0
+            #print("scores size {}".format(scores.size(0)))
+            y = torch.full((scores.size(0),H,E),Log.zero,device=device) #output pointer
         else:
             r_1 = 0
             r_2 = upper_t_range-lower_t_range
             f_offset=pad-1
-
+            lower_t_range_offset=lower_t_range
+            y = torch.full((upper_t_range-lower_t_range,H,E),Log.zero,device=device) #output pointer
         with cp.cuda.Device(0):
             #Need to break down L,H,E into block sizes <=1024
             #L can't be moved because of thread sync. dependency
             #1024/L = H*E
-            #E is typically small (at most 2 for now), so we can just do 1024//(L*E) for H threads per block
-            h_per_block = 1024//(L*E)
+            #E is typically small (at most 2 for now), so we cajust do 1024//(L*E) for H threads per block
+            max_T_per_block=128
+            h_per_block = max_T_per_block//(L*E)
             H_blocks = (H//h_per_block)+1
-            HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,1,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,args=(target_scores.data_ptr(),y.data_ptr(),
+            #print(H_blocks)
+            HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,1,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,args=(targets.data_ptr(),scores.data_ptr(),y.data_ptr(),
                                                                                                                                    mask.data_ptr(),w.data_ptr(),r_1,r_2,
-                                                                                                                                   H,E,L,T,2,1,f_offset,F.size(0)))
+                                                                                                                                   H,E,L,2,1,f_offset,F.size(0),lower_t_range_offset))
         return y
         
     

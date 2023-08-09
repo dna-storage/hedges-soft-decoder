@@ -53,7 +53,7 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
 
     gc.collect()
     torch.cuda.empty_cache()
-    torch.cuda.synchronize()
+    #torch.cuda.synchronize()
     start_time=time.time()
     try:
         with torch.no_grad():
