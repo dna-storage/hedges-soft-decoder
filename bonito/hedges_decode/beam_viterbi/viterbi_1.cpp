@@ -26,7 +26,7 @@ so that an appropriate comparison of approaches can be made
 
 
 /*GLOBAL CONSTANTS*/
-__device__ __constant__  prev_state_info_t gpu_previus_states[MAX_NSTATE_CONV*TOTAL_PREVIOUS]; 
+__device__ __constant__  prev_state_info_t gpu_previous_states[MAX_NSTATE_CONV*TOTAL_PREVIOUS]; 
 __device__ __constant__  pattern_info_t gpu_pattern_vector;
 /*END GLOBAL CONSTANTS*/
 
@@ -62,7 +62,7 @@ std::string bases_from_bits(bitset_t b,uint32_t message_length){
   std::string ret_string="";
   uint32_t bitset_index=0;
   //assuming big endian in the bitset
-  for(uint32_t i=message_length*2-1; i>=1;i-=2){ //iterate in reverse because of bitset ordering
+  for(int i=message_length*2-1; i>=1;i-=2){ //iterate in reverse because of bitset ordering
     uint8_t bit1 = b[i];
     uint8_t bit2 = b[i-1];
     ret_string += int2base[bit1*2+bit2];
@@ -144,7 +144,7 @@ std::vector<bitset_t> decode_post_conv_parallel_LVA(
   LVA_path_t_SOA prev_best_paths(nstate_total*list_size,true);
   curr_best_paths.set_context(proto_context);
   prev_best_paths.set_context(proto_context);
-
+  std::cout<<"make CPU paths"<<std::endl;
 
 // precompute the previous states and associated info for all states now
 // note that this is valid only for st_pos > 0 (if st_pos = 0, only previous
@@ -154,8 +154,9 @@ std::vector<bitset_t> decode_post_conv_parallel_LVA(
 // KV NOTE: flatten this to an array so it can be passed off to the GPU easier
 GPU_CONST_CHECK((TOTAL_PREVIOUS*nstate_conv));
 prev_state_info_t* prev_state_flat_vector = new prev_state_info_t[TOTAL_PREVIOUS*nstate_conv];
+ std::cout<<std::dec<<"TOTAL_PREVIOUS*nstate_conv "<<TOTAL_PREVIOUS*nstate_conv<<std::endl;
 for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
-  uint32_t nbit_start_index  = (1ULL<nbits)-1;
+  uint32_t nbit_start_index  = (uint32_t)((1ULL<<nbits)-1);
   #pragma omp parallel
   #pragma omp for
   for (uint32_t st_conv = 0; st_conv < nstate_conv; st_conv++){
@@ -164,6 +165,7 @@ for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
       for (auto& previous:p){
         uint32_t previous_index = nbit_start_index+previous_offset;
         prev_state_flat_vector[st_conv*TOTAL_PREVIOUS+previous_index]=previous;
+	previous_offset+=1;
       }
   }
 }
@@ -175,7 +177,7 @@ for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
   curr_best_paths.last_base[initial_st]=0;
   curr_best_paths.compute_score_cpu(initial_st);
 
-
+  std::cout<<"CPU Init"<<std::endl;
   //Move initialized trellis states to GPU 
   LVA_path_t_SOA gpu_curr_best_paths(nstate_total*list_size,false);
   LVA_path_t_SOA gpu_prev_best_paths(nstate_total*list_size,false);
@@ -183,10 +185,10 @@ for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
   host_to_dev(curr_best_paths,gpu_curr_best_paths);
   host_to_dev(prev_best_paths,gpu_prev_best_paths);
   //copy prev_state_vector and pattern information into constant memory
-  cudaMemcpyToSymbol("gpu_previous_states", (void*)prev_state_flat_vector, TOTAL_PREVIOUS*nstate_conv*sizeof(prev_state_info_t));
-  cudaMemcpyToSymbol("gpu_pattern_vector", (void*)&pattern_info, sizeof(pattern_info_t));
+  cudaMemcpyToSymbol(gpu_previous_states, (void*)prev_state_flat_vector, TOTAL_PREVIOUS*nstate_conv*sizeof(prev_state_info_t));
+  cudaMemcpyToSymbol(gpu_pattern_vector, (void*)&pattern_info, sizeof(pattern_info_t));
 
-
+  std::cout<<"Init GPU mem"<<std::endl;
   //kernel argument loading
   kernel_values_t kernel_args;
   kernel_args.nstate_conv=nstate_conv;
@@ -196,12 +198,15 @@ for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
   kernel_args.post_T = post_T;
   kernel_args.post_NB = NBASE;
   kernel_args.curr_best_paths=gpu_curr_best_paths;
-  kernel_args.prev_best_paths=gpu_curr_best_paths;
+  kernel_args.prev_best_paths=gpu_prev_best_paths;
   kernel_args.candidate_paths=candidate_paths;
-
+  kernel_args.offset=offset;
+  kernel_args.rc_flag=rc_flag;
+  std::cout<<"Kernel Initialized"<<std::endl;
   // forward Viterbi pass
   for (uint32_t t = 0; t < nblk; t++) {
     std::cout<<std::dec<<"Block index "<<(int)t<<std::endl;
+    //if(t>600) break;
     // swap prev and curr arrays
     std::swap(kernel_args.curr_best_paths, kernel_args.prev_best_paths);
     // only allow pos which can have non -INF scores or will lead to useful
@@ -216,10 +221,11 @@ for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
 
     kernel_args.start_pos=st_pos_start;
     kernel_args.end_pos=st_pos_end;
+    kernel_args.trellis_time=t;
 
     //call kernel to calculate updated trellis
     call_beam_kernel_1(kernel_args);
-    cudaDeviceSynchronize();
+
   }
 
   //transfer back to host and free gpu memory
@@ -230,6 +236,7 @@ for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
   candidate_paths.free();
   prev_best_paths.free();
 
+  std::cout<<"Dev to host"<<std::endl;
 
   //reframe the SOA to an AOS to make data better for CPU
   LVA_path_t* curr_best_paths_AOS = new LVA_path_t[nstate_total*list_size];

@@ -45,7 +45,7 @@ def basecall(model, reads, beamsize=5, chunksize=0, overlap=0, batchsize=1, qsco
     else:
         decoder = partial(decode, decode=model.decode, beamsize=beamsize, qscores=qscores, stride=model.stride)
     #pickle.dump([(read,s['scores']) for read,s in scores],open("debug_scores","wb+"))
-    basecalls = process_map(decoder, scores, n_proc=1)
+    basecalls = process_map(decoder, scores, n_proc=8)
     return basecalls
 
 

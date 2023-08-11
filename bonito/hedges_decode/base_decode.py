@@ -168,7 +168,7 @@ class HedgesBonitoBase:
                                                                                                          )
             )
 
-        #torch.cuda.synchronize(0)
+        torch.cuda.synchronize(0)
         return return_F
 
     #@profile
@@ -386,8 +386,9 @@ class HedgesBonitoBeam(HedgesBonitoBase):
         #launches beam viterbi decoding
         message_length = self._L
         #message_length=300
+        gpu_scores = scores.to(self._device)
         out_seq = run_beam_1(int(math.log2(self._H)),self.get_initial_trellis_index(self._global_hedge_state_init),message_length,self._list_size,
-                             scores_cpu.size(0),reverse,scores_cpu.data_ptr(),self._global_hedge_state_init,self._full_message_length-self._L,self._omp_threads) 
+                             scores_cpu.size(0),reverse,gpu_scores.data_ptr(),self._global_hedge_state_init,self._full_message_length-self._L,self._omp_threads) 
         out_seq = self.fastforward_seq+out_seq
         if reverse: out_seq=complement(out_seq)     
         return out_seq

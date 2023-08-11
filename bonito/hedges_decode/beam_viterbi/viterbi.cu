@@ -20,7 +20,7 @@ __device__ __forceinline__ uint8_t base2int(char base) {
   case 'T':
     return 3;
   default:
-    return 0xff;
+    return 0;
   }
 }
 __device__ __forceinline__ char complement(char base) {
@@ -29,13 +29,13 @@ __device__ __forceinline__ char complement(char base) {
   case 'A':
     return 'T';  
   case 'C':
-    return 'G';
+ return 'G';
   case 'G':
     return 'C';
   case 'T':
     return 'A';
   default:
-    return '\0';
+    return 'A';
   }
 }
 
@@ -75,10 +75,10 @@ __global__ void beam_kernel_1(kernel_values_t* args){
   // already appeared before
   // start with psidx = 1, since 0 corresponds to stay (already done above)        
   if (st_pos != 0) { // otherwise only stay transition makes sense
-	  nbits = gpu_pattern_vector.pattern[st_pos%gpu_pattern_vector.pattern_length];
+	  nbits = gpu_pattern_vector.pattern[(st_pos+args->offset-1)%gpu_pattern_vector.pattern_length];
     uint32_t number_previous = (1ULL<<nbits)-1;
     uint32_t start_index = number_previous; 
-    for (uint32_t psidx = number_previous; psidx < number_previous*2; psidx++)
+    for (uint32_t psidx = number_previous; psidx < 2*(number_previous)+1; psidx++)
     {
       msg_value = gpu_previous_states[st_conv*TOTAL_PREVIOUS+psidx].guess_value; // Moved msg_value here, should be the same for all incoming states
       uint32_t prev_st_conv = gpu_previous_states[st_conv*TOTAL_PREVIOUS+psidx].st_conv;
@@ -108,12 +108,14 @@ __global__ void beam_kernel_1(kernel_values_t* args){
           new_score_nonblank =
               logsumexp2(prev_best_paths.score_blank[prev_st] + post[get_post_idx(t, msg_newbits + 1)],
                          prev_best_paths.score_nonblank[prev_st] + post[get_post_idx(t, msg_newbits + 1)]);
+
         }
         else
         {
           // the newly added base is same as last base so we can't have the
           // thing ending with non_blank (otherwise it gets collapsed)
           new_score_nonblank = prev_best_paths.score_blank[prev_st] + post[get_post_idx(t, msg_newbits + 1)];
+
         }
         if (new_score_nonblank <= ZERO)
         {
@@ -145,7 +147,7 @@ __global__ void beam_kernel_1(kernel_values_t* args){
         {
           uint32_t candidate_pos = get_candidate_idx(st_pos,st_conv,candidate_iter);
           //NOTE: optimized message assignment out, already computed message in candidate memory
-          candidate_paths.assign(candidate_pos,new_score_nonblank,new_score_blank,prev_best_paths.last_base[prev_st],false,
+          candidate_paths.assign(candidate_pos,new_score_nonblank,new_score_blank,msg_newbits+1,false,
             prev_best_paths.hedge_context[prev_st]);
           candidate_iter++;
         }
@@ -156,24 +158,27 @@ __global__ void beam_kernel_1(kernel_values_t* args){
   // update scores based on score_blank and score_nonblank
   for (uint32_t i = 0; i < candidate_iter; i++){
     uint32_t candidate_pos = get_candidate_idx(st_pos,st_conv,i);
-    candidate_paths.compute_score_gpu(candidate_pos);
+    candidate_paths.compute_score_gpu(candidate_pos); 
   } 
 
   uint32_t num_candidates_to_keep = list_size<candidate_iter ? list_size : candidate_iter;
 
   
   uint32_t index[MAX_CANDIDATES];
-  for(int i=0; i<candidate_iter; i++) index[0]=i;
-  // use nth_element to to do partial sorting if num_candidates_to_keep < num_candidates
-  if (num_candidates_to_keep < candidate_iter && num_candidates_to_keep > 0){
-    thrust::sort(index,index+candidate_iter,
-                [&candidate_paths,&st_pos,&st_conv,&nstate_pos] __host__ __device__ (uint32_t left_idx, uint32_t right_idx)
-                 {
-                    uint32_t candidate_pos_left = get_candidate_idx(st_pos,st_conv,left_idx);
-                    uint32_t candidate_pos_right = get_candidate_idx(st_pos,st_conv,right_idx);
-                    return candidate_paths.score[candidate_pos_left] > candidate_paths.score[candidate_pos_right];
-                 }
-        );
+  for(int i=0; i<candidate_iter; i++) index[i]=i;
+  
+  //simple bubble sort
+  for(int i=0; i<(int)candidate_iter-1;i++){
+      for(int j=0; j<(int)candidate_iter-1-i;j++){
+      	 if(candidate_paths.score[get_candidate_idx(st_pos,st_conv,index[j])]<candidate_paths.score[get_candidate_idx(st_pos,st_conv,index[j+1])]){
+	    uint32_t temp=index[j+1];
+	    index[j+1]=index[j];
+	    index[j]=temp;
+	 }
+      }
+  }
+  for(uint32_t i =0; i<candidate_iter;i++){
+    uint32_t candidate_pos=get_candidate_idx(st_pos,st_conv,index[i]);
   }
 
 
@@ -182,8 +187,8 @@ __global__ void beam_kernel_1(kernel_values_t* args){
   // thus, we need to copy candidate by candidate more carefully
   for (int i = 0; i < num_candidates_to_keep; i++)
   {
-    uint32_t st =get_state_idx(st_pos,st_conv,candidate_iter);
-    uint32_t candidate_pos = get_candidate_idx(st_pos,st_conv,candidate_iter);
+    uint32_t st =get_state_idx(st_pos,st_conv,i);
+    uint32_t candidate_pos = get_candidate_idx(st_pos,st_conv,index[i]);
     curr_best_paths.copy_candidate(candidate_paths,nbits,msg_value,st,candidate_pos);
   }
 
@@ -196,15 +201,19 @@ __global__ void beam_kernel_1(kernel_values_t* args){
 
 __host__ void call_beam_kernel_1(kernel_values_t& args){
     //Determine the sizing of kernel grid
-    dim3 threads_per_block(32,32,1); //using 32x32 blocks (x-> positions) (y-> convolutional)
-    assert(args.nstate_conv%32==0);
-    uint32_t H_blocks = args.nstate_conv/32;
-    uint32_t pos_blocks = (args.nstate_pos/32)+1; //+1 to ensure there's enough
+    int dim  = 16;
+    dim3 threads_per_block(dim,dim,1); //using 32x32 blocks (x-> positions) (y-> convolutional)
+    assert(args.nstate_conv%dim==0);
+    uint32_t H_blocks = args.nstate_conv/dim;
+    uint32_t pos_blocks = (args.nstate_pos/dim)+1; //+1 to ensure there's enough
     dim3 blocks(pos_blocks,H_blocks,1);
     //copy args to gpu
     kernel_values_t* gpu_args=NULL;
     cudaMalloc((void**)&gpu_args,sizeof(kernel_values_t));
     cudaMemcpy((void*)gpu_args,(void*)&args,sizeof(kernel_values_t),cudaMemcpyHostToDevice);
     beam_kernel_1<<< blocks, threads_per_block>>>(gpu_args);
+    cudaError_t err = cudaGetLastError();
+    //if (err != cudaSuccess)  printf("Error: %s\n", cudaGetErrorString(err));
+    cudaDeviceSynchronize();	
     cudaFree((void*)gpu_args);
 }

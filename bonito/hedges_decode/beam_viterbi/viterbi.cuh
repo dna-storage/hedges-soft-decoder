@@ -15,8 +15,8 @@
 #define NBIT_RANGE  2 // range of total bits that can be transferred per base (non inclusive)
 #define BITSET_SIZE 2160 * 2
 #define MAX_NSTATE_CONV ((uint32_t)1ULL << 11)
-#define MAX_LIST_SIZE 8 //set a max list size for mem safety
-#define MAX_CANDIDATES (8*((1ULL<<NBIT_RANGE)-1)) //set the max number of candidates so we can allocate memory
+#define MAX_LIST_SIZE 1 //set a max list size for mem safety
+#define MAX_CANDIDATES (MAX_LIST_SIZE*((1ULL<<NBIT_RANGE)-1)) //set the max number of candidates so we can allocate memory
 #define GPU_CONST_CHECK(x) (assert(x <= MAX_NSTATE_CONV)) // safety checker to make sure constant memory isn't over-subbed
 #define get_state_idx(st_pos, st_conv, list_pos) (st_conv * ((uint32_t)nstate_pos) * list_size + ((uint32_t)list_pos) * ((uint32_t)nstate_pos) + st_pos) // indexing for both cuda and c++ code
 #define get_candidate_idx(st_pos,st_conv,can_pos)  (st_conv * ((uint32_t)nstate_pos) * MAX_CANDIDATES  + ((uint32_t)can_pos) * ((uint32_t)nstate_pos) + st_pos) 
@@ -146,6 +146,8 @@ public:
     char* ptr = (char*)constraint_ptr;
     memcpy(last,ptr,12*sizeof(char));
     ptr+=12*sizeof(char);
+    memcpy((char*)&index,ptr,sizeof(char));
+    ptr+=sizeof(char);
     memcpy((char*)&run,ptr,sizeof(uint8_t));
     ptr+=sizeof(uint8_t);
     memcpy((char*)&AT,ptr,sizeof(uint8_t));
@@ -211,6 +213,7 @@ public:
 };
 /**********************************************************************/
 
+#define BITSET_BYTES(x) ((N/8)+1)
 
 //TODO: change this to something like a bit matrix for more efficient cuda handling?
 template <int N>
@@ -218,21 +221,20 @@ class cuda_bitset_t
 { // basic bitset class that can be used by CUDA
 
 public:
-  uint8_t _a[N];
+  uint8_t _a[BITSET_BYTES(N)];
 
   CUDA_CALLABLE_MEMBER cuda_bitset_t()
   { // clear bitset
-    for (int i = 0; i < N; i++)
-      _a[0] = 0;
+    for (int i = 0; i < BITSET_BYTES(N); i++)
+      _a[i] = 0;
   }
   CUDA_CALLABLE_MEMBER cuda_bitset_t &operator<<=(int n)
   {
-    uint8_t mask = ~(0x01 << n);
-    for (int i = N - 1; i >= 0; i--)
+    for (int i = BITSET_BYTES(N) - 1; i >= 0; i--)
     {
       this->_a[i] = this->_a[i] << n;
       if (i > 0)
-        this->_a[i] = this->_a[i] | (this->_a[i - 1] & mask);
+        this->_a[i] = this->_a[i] | (this->_a[i - 1]>>(8-n));
     }
     return *this;
   }
@@ -246,7 +248,7 @@ public:
 
   CUDA_CALLABLE_MEMBER cuda_bitset_t &operator|=(const cuda_bitset_t &rhs)
   {
-    for (int i = 0; i < N; i++) this->_a[i] = this->_a[i] | rhs._a[i];
+    for (int i = 0; i < BITSET_BYTES(N); i++) this->_a[i] = this->_a[i] | rhs._a[i];
     return *this;
   }
 
@@ -260,15 +262,15 @@ public:
   CUDA_CALLABLE_MEMBER uint8_t operator[](uint32_t i)
   {
     // return bit at position i (0 is least sig bit, this is so to work similarly to bitset)
-    uint32_t byte_index = i / sizeof(uint8_t);
-    uint32_t bit_index = i % sizeof(uint8_t);
+    uint32_t byte_index = i / 8;
+    uint32_t bit_index = i % 8;
     return (this->_a[byte_index] >> bit_index) & 0x01;
   }
 
 
   CUDA_CALLABLE_MEMBER bool operator==(const cuda_bitset_t &c)
   {
-    for(uint32_t i=0;i<N;i++){
+    for(uint32_t i=0;i<BITSET_BYTES(N);i++){
       if(_a[i]!=c._a[i]) return false;
     }
     return true;
@@ -282,7 +284,7 @@ public:
   CUDA_CALLABLE_MEMBER cuda_bitset_t(uint8_t b)
   {
     _a[0] = b; // just put the incoming byte at the bottom of the array, bits should simply match up
-    for (int i = 1; i < N; i++)
+    for (int i = 1; i < BITSET_BYTES(N); i++)
       _a[i] = 0;
   }
 };
@@ -291,7 +293,7 @@ template<int N>
 CUDA_CALLABLE_MEMBER cuda_bitset_t<N> operator|(const cuda_bitset_t<N> &lhs, const cuda_bitset_t<N> &rhs)
   {
     cuda_bitset_t<N> r;
-    for (int i = 0; i < N; i++)
+    for (int i = 0; i < BITSET_BYTES(N); i++)
       r[i] = lhs._a[i] | rhs._a[i];
     return r;
   }
@@ -324,7 +326,7 @@ struct pattern_info_t
 };
 
 
-extern __device__ __constant__  prev_state_info_t gpu_previous_states[MAX_NSTATE_CONV*TOTAL_PREVIOUS]; 
+extern __device__ __constant__  prev_state_info_t gpu_previous_states[]; 
 extern __device__ __constant__  pattern_info_t gpu_pattern_vector;
 
 //struct used as SOA at end of algoritm
@@ -441,6 +443,7 @@ struct LVA_path_t_SOA
     __device__ void compute_score_gpu(uint32_t i)
     {
       score[i] = logsumexp2(score_blank[i], score_nonblank[i]);
+      //printf(" score_blank %f score_nonblank %f score %f \n",score_blank[i],score_nonblank[i],score[i]);
     }
  
 };
@@ -451,19 +454,19 @@ struct LVA_candidate_t_SOA:public LVA_path_t_SOA{//class to hold candidate infor
     bool* is_stay;
     LVA_candidate_t_SOA(uint32_t n,bool is_host):LVA_path_t_SOA(n,is_host){
       assert(is_host==false); //should be only for gpu
-      cudaMalloc((void **)&msg, sizeof(bitset_t) * n);
+      cudaMalloc((void **)&is_stay, sizeof(bool) * n);
     }
     LVA_candidate_t_SOA(){}
     __host__ void free(){
       cudaFree((void*)is_stay);
-      LVA_candidate_t_SOA::free();
+      LVA_path_t_SOA::free();
     }
     __device__ void assign(uint32_t pos, const bitset_t &msg_, const float &score_nonblank_,
                             const float &score_blank_, const uint8_t &last_base_, bool stay, const context& hedge_context_ )
     { //assign values to candidate memory
       msg[pos]=msg_;         
       score_nonblank[pos]=score_nonblank_; 
-      score_blank[pos]=score_nonblank_;   
+      score_blank[pos]=score_blank_;   
       last_base[pos]=last_base_;
       hedge_context[pos]=hedge_context_;    
       is_stay[pos]=stay;    
@@ -472,7 +475,7 @@ struct LVA_candidate_t_SOA:public LVA_path_t_SOA{//class to hold candidate infor
                         const float &score_blank_, const uint8_t &last_base_, bool stay, const context& hedge_context_ )
     { //assign values to candidate memory
       score_nonblank[pos]=score_nonblank_; 
-      score_blank[pos]=score_nonblank_;   
+      score_blank[pos]=score_blank_;   
       last_base[pos]=last_base_;
       hedge_context[pos]=hedge_context_;    
       is_stay[pos]=stay;    
@@ -489,7 +492,7 @@ struct LVA_candidate_t_SOA:public LVA_path_t_SOA{//class to hold candidate infor
       this->score[dest_index] = candidate.score[candidate_index];
       this->last_base[dest_index] = candidate.last_base[candidate_index];
       this->hedge_context[dest_index] = candidate.hedge_context[candidate_index];
-      if (!candidate.is_stay) this->hedge_context[dest_index].nextSymbolWithUpdate(nbits,msg_value,0xff);
+      if (!candidate.is_stay[candidate_index]) this->hedge_context[dest_index].nextSymbolWithUpdate(nbits,msg_value,0xff);
     }
 
 
@@ -502,7 +505,7 @@ inline __host__ void transfer(LVA_path_t_SOA &dst, LVA_path_t_SOA &src, cudaMemc
   cudaMemcpy(dst.score_blank, src.score_blank, sizeof(float) * src.size, c);
   cudaMemcpy(dst.score, src.score, sizeof(float) * src.size, c);
   cudaMemcpy(dst.last_base, src.last_base, sizeof(uint8_t) * src.size, c);
-  cudaMemcpy(dst.hedge_context, src.hedge_context, sizeof(void *) * src.size, c);
+  cudaMemcpy(dst.hedge_context, src.hedge_context, sizeof(context) * src.size, c);
 }
 
 inline __host__ void host_to_dev(LVA_path_t_SOA &host, LVA_path_t_SOA &device)
@@ -537,6 +540,7 @@ struct kernel_values_t
   uint32_t start_pos;          // starting point for pos
   uint32_t end_pos;            // end point for pos
   bool rc_flag;                // reverse complement flag
+  uint32_t offset; //offset 
   kernel_values_t(){}
 };                             // struct for packaging kernel parameters so that signaturs don't need to keep being made
 
