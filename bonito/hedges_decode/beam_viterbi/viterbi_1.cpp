@@ -144,7 +144,7 @@ std::vector<bitset_t> decode_post_conv_parallel_LVA(
   LVA_path_t_SOA prev_best_paths(nstate_total*list_size,true);
   curr_best_paths.set_context(proto_context);
   prev_best_paths.set_context(proto_context);
-  std::cout<<"make CPU paths"<<std::endl;
+  //std::cout<<"make CPU paths"<<std::endl;
 
 // precompute the previous states and associated info for all states now
 // note that this is valid only for st_pos > 0 (if st_pos = 0, only previous
@@ -154,7 +154,7 @@ std::vector<bitset_t> decode_post_conv_parallel_LVA(
 // KV NOTE: flatten this to an array so it can be passed off to the GPU easier
 GPU_CONST_CHECK((TOTAL_PREVIOUS*nstate_conv));
 prev_state_info_t* prev_state_flat_vector = new prev_state_info_t[TOTAL_PREVIOUS*nstate_conv];
- std::cout<<std::dec<<"TOTAL_PREVIOUS*nstate_conv "<<TOTAL_PREVIOUS*nstate_conv<<std::endl;
+//std::cout<<std::dec<<"TOTAL_PREVIOUS*nstate_conv "<<TOTAL_PREVIOUS*nstate_conv<<std::endl;
 for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
   uint32_t nbit_start_index  = (uint32_t)((1ULL<<nbits)-1);
   #pragma omp parallel
@@ -177,7 +177,7 @@ for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
   curr_best_paths.last_base[initial_st]=0;
   curr_best_paths.compute_score_cpu(initial_st);
 
-  std::cout<<"CPU Init"<<std::endl;
+  //std::cout<<"CPU Init"<<std::endl;
   //Move initialized trellis states to GPU 
   LVA_path_t_SOA gpu_curr_best_paths(nstate_total*list_size,false);
   LVA_path_t_SOA gpu_prev_best_paths(nstate_total*list_size,false);
@@ -188,7 +188,7 @@ for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
   cudaMemcpyToSymbol(gpu_previous_states, (void*)prev_state_flat_vector, TOTAL_PREVIOUS*nstate_conv*sizeof(prev_state_info_t));
   cudaMemcpyToSymbol(gpu_pattern_vector, (void*)&pattern_info, sizeof(pattern_info_t));
 
-  std::cout<<"Init GPU mem"<<std::endl;
+  //std::cout<<"Init GPU mem"<<std::endl;
   //kernel argument loading
   kernel_values_t kernel_args;
   kernel_args.nstate_conv=nstate_conv;
@@ -202,7 +202,7 @@ for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
   kernel_args.candidate_paths=candidate_paths;
   kernel_args.offset=offset;
   kernel_args.rc_flag=rc_flag;
-  std::cout<<"Kernel Initialized"<<std::endl;
+  //std::cout<<"Kernel Initialized"<<std::endl;
   // forward Viterbi pass
   for (uint32_t t = 0; t < nblk; t++) {
     std::cout<<std::dec<<"Block index "<<(int)t<<std::endl;

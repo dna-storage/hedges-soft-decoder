@@ -323,6 +323,7 @@ public:
   CUDA_CALLABLE_MEMBER cuda_bitset_matrix_t(uint32_t n,bool is_host)
   { 
     _is_host=is_host;
+    _byte_stride=n;
     // clear bitset
     if(is_host){
       _a = new uint8_t[sizeof(uint8_t)*n*BITSET_BYTES(N)];
@@ -358,7 +359,7 @@ public:
   CUDA_CALLABLE_MEMBER  void assign(uint32_t lhs_idx, uint32_t rhs_idx,cuda_bitset_matrix_t rhs){
     //copy bytes from other matrix 
     for(uint32_t i=0; i<BITSET_BYTES(N); i++){
-        this->_a[i*_byte_stride+lhs_idx] = rhs._a[i*_byte_stride+rhs_idx];
+        this->_a[i*_byte_stride+lhs_idx] = rhs._a[i*rhs._byte_stride+rhs_idx];
     }
   }
 };
