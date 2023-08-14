@@ -63,8 +63,8 @@ __global__ void beam_kernel_1(kernel_values_t* args){
 
     uint32_t candidate_pos = get_candidate_idx(st_pos,st_conv,candidate_iter);
     candidate_paths.assign(candidate_pos,
-            prev_best_paths.msg[st],new_score_nonblank,new_score_blank,prev_best_paths.last_base[st],true,
-            prev_best_paths.hedge_context[st]);
+            prev_best_paths.msg,new_score_nonblank,new_score_blank,prev_best_paths.last_base[st],true,
+            prev_best_paths.hedge_context[st],st);
     candidate_iter++;
   } 
 	
@@ -95,11 +95,12 @@ __global__ void beam_kernel_1(kernel_values_t* args){
 
         uint32_t candidate_index = get_candidate_idx(st_pos,st_conv,candidate_iter);
         // KV: NOTE: I'm making msg the base message instead of bits message
-        bitset_t& msg = prev_best_paths.msg[prev_st];
-        candidate_paths.msg[candidate_index] = msg;
+        bitset_matrix_t& msg = prev_best_paths.msg;
+        candidate_paths.msg.assign(candidate_index,prev_st,msg);
         uint8_t msg_newbits = base2int(new_base);
-        candidate_paths.msg[candidate_index]<<=2;
-        candidate_paths.msg[candidate_index] |=msg_newbits;
+        
+        candidate_paths.msg.shift(candidate_index,2);
+        candidate_paths.msg.or_byte(candidate_index,msg_newbits);
 
         float new_score_blank = ZERO;
         float new_score_nonblank = ZERO;
@@ -134,7 +135,7 @@ __global__ void beam_kernel_1(kernel_values_t* args){
           uint32_t stay_candidate_index= get_candidate_idx(st_pos,st_conv,j);
           if (msg_newbits == candidate_paths.last_base[stay_candidate_index])
           {
-            if (msg == candidate_paths.msg[stay_candidate_index])
+            if (bitset_matrix_is_equal(msg,prev_st,candidate_paths.msg,stay_candidate_index))
             {
               match_found = true;
                 candidate_paths.score_nonblank[stay_candidate_index] =

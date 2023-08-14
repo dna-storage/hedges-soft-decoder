@@ -213,7 +213,7 @@ public:
 };
 /**********************************************************************/
 
-#define BITSET_BYTES(x) ((N/8)+1)
+#define BITSET_BYTES(x) ((x/8)+1)
 
 //TODO: change this to something like a bit matrix for more efficient cuda handling?
 template <int N>
@@ -289,6 +289,9 @@ public:
   }
 };
 
+typedef cuda_bitset_t<BITSET_SIZE> bitset_t;
+
+
 template<int N>
 CUDA_CALLABLE_MEMBER cuda_bitset_t<N> operator|(const cuda_bitset_t<N> &lhs, const cuda_bitset_t<N> &rhs)
   {
@@ -299,8 +302,78 @@ CUDA_CALLABLE_MEMBER cuda_bitset_t<N> operator|(const cuda_bitset_t<N> &lhs, con
   }
 
 
+//bitset matrix that stores all bitsets for all states in 1 struct
+// idea is to allow bitset data layout such that more memory operations can be coalesced
+template <int N>
+class cuda_bitset_matrix_t
+{ 
+public:
+  uint8_t* _a; 
+  uint32_t _byte_stride;
+  bool _is_host;
 
-typedef cuda_bitset_t<BITSET_SIZE> bitset_t;
+  CUDA_CALLABLE_MEMBER cuda_bitset_matrix_t(){}
+
+  CUDA_CALLABLE_MEMBER void free(){
+    if(this->_is_host)delete[] this->_a;
+    else cudaFree(this->_a);
+  }
+  
+
+  CUDA_CALLABLE_MEMBER cuda_bitset_matrix_t(uint32_t n,bool is_host)
+  { 
+    _is_host=is_host;
+    // clear bitset
+    if(is_host){
+      _a = new uint8_t[sizeof(uint8_t)*n*BITSET_BYTES(N)];
+      for (int i = 0; i < BITSET_BYTES(N)*n; i++) _a[i] = 0;
+    }
+    else {
+        cudaMalloc(&_a,BITSET_BYTES(N)*n);
+    }
+  }
+  CUDA_CALLABLE_MEMBER cuda_bitset_matrix_t& shift(uint32_t bitset_idx, int n)
+  {
+    for (int i = BITSET_BYTES(N) - 1; i >= 0; i--)
+    {
+      this->_a[i*_byte_stride+bitset_idx] = this->_a[i*_byte_stride+bitset_idx] << n;
+      if (i > 0)
+        this->_a[i*_byte_stride+bitset_idx] = this->_a[i*_byte_stride+bitset_idx] | (this->_a[(i - 1)*_byte_stride+bitset_idx]>>(8-n));
+    }
+    return *this;
+  }
+
+  CUDA_CALLABLE_MEMBER cuda_bitset_matrix_t or_byte(uint32_t idx, uint8_t b)
+  { // simple fast call that just ORs at the bottom of the array
+    this->_a[idx] |= b;
+    return *this;
+  }
+
+  CUDA_CALLABLE_MEMBER  void to_bitset(uint32_t idx,cuda_bitset_t<N>& b){
+    for(uint32_t i=0; i<BITSET_BYTES(N); i++){
+        b._a[i] = _a[i*_byte_stride];
+    }
+  }
+
+  CUDA_CALLABLE_MEMBER  void assign(uint32_t lhs_idx, uint32_t rhs_idx,cuda_bitset_matrix_t rhs){
+    //copy bytes from other matrix 
+    for(uint32_t i=0; i<BITSET_BYTES(N); i++){
+        this->_a[i*_byte_stride+lhs_idx] = rhs._a[i*_byte_stride+rhs_idx];
+    }
+  }
+};
+
+template<int N>
+CUDA_CALLABLE_MEMBER bool bitset_matrix_is_equal(const cuda_bitset_matrix_t<N>& lhs, uint32_t lhs_index,const cuda_bitset_matrix_t<N>& rhs, uint32_t rhs_index)
+  {
+    for(uint32_t i=0;i<BITSET_BYTES(N);i++){
+      if(lhs._a[i*lhs._byte_stride+lhs_index]!=rhs._a[i*rhs._byte_stride+rhs_index]) return false;
+    }
+    return true;
+  }
+
+
+typedef cuda_bitset_matrix_t<BITSET_SIZE> bitset_matrix_t;
 
 // struct for storing information about previous state for a current state and
 // the transition
@@ -350,7 +423,7 @@ struct LVA_candidate_t_SOA;
 struct LVA_path_t_SOA
 {
   public:
-    bitset_t *msg;         // KV:Note: Msg is now the DNA-message, not the binary message. helps analysis to be easier later
+    bitset_matrix_t msg;         // KV:Note: Msg is now the DNA-message, not the binary message. helps analysis to be easier later
     float *score_nonblank; // score for path ending with non-blank base
     float *score_blank;    // score for path ending with non-blank base
     float *score;          // logsumexp(score_nonblank,score_blank), used for sorting
@@ -373,7 +446,7 @@ struct LVA_path_t_SOA
       size=n;
       if (is_host == true)
       { // cpu
-        msg = new bitset_t[n];
+        msg = bitset_matrix_t(n,is_host);
         score_blank = new float[n];
         score_nonblank = new float[n];
         score = new float[n];
@@ -388,7 +461,7 @@ struct LVA_path_t_SOA
       else
       {
         is_cpu = false;
-        cudaMalloc((void **)&msg, sizeof(bitset_t) * n);
+        msg = bitset_matrix_t(n,is_host);
         cudaMalloc((void **)&score_nonblank, sizeof(float) * n);
         cudaMalloc((void **)&score_blank, sizeof(float) * n);
         cudaMalloc((void **)&score, sizeof(float) * n);
@@ -399,9 +472,9 @@ struct LVA_path_t_SOA
 
     __host__ void free()
     {
+      msg.free();
       if (is_cpu)
       {
-        delete[] msg;
         delete[] score_blank;
         delete[] score_nonblank;
         delete[] score;
@@ -410,7 +483,6 @@ struct LVA_path_t_SOA
       }
       else
       {
-        cudaFree((void *)msg);
         cudaFree((void *)score_blank);
         cudaFree((void *)score_nonblank);
         cudaFree((void *)score);
@@ -422,7 +494,7 @@ struct LVA_path_t_SOA
     __host__ void to_AOS(LVA_path_t* AOS, uint32_t n){
       assert(size==n);
       for(uint32_t i=0; i<n;i++){
-        AOS[i].msg=msg[i];
+        msg.to_bitset(i,AOS[i].msg);
         AOS[i].score_blank=score_blank[i];
         AOS[i].score_nonblank=score_nonblank[i];
         AOS[i].score=score[i];
@@ -461,10 +533,11 @@ struct LVA_candidate_t_SOA:public LVA_path_t_SOA{//class to hold candidate infor
       cudaFree((void*)is_stay);
       LVA_path_t_SOA::free();
     }
-    __device__ void assign(uint32_t pos, const bitset_t &msg_, const float &score_nonblank_,
-                            const float &score_blank_, const uint8_t &last_base_, bool stay, const context& hedge_context_ )
+    __device__ void assign(uint32_t pos, const bitset_matrix_t &msg_, const float &score_nonblank_,
+                            const float &score_blank_, const uint8_t &last_base_, bool stay, const context& hedge_context_,
+                            uint32_t source_idx )
     { //assign values to candidate memory
-      msg[pos]=msg_;         
+      msg.assign(pos,source_idx,msg);
       score_nonblank[pos]=score_nonblank_; 
       score_blank[pos]=score_blank_;   
       last_base[pos]=last_base_;
@@ -486,7 +559,7 @@ struct LVA_candidate_t_SOA:public LVA_path_t_SOA{//class to hold candidate infor
   inline CUDA_CALLABLE_MEMBER void LVA_path_t_SOA::copy_candidate(const LVA_candidate_t_SOA &candidate, uint8_t nbits, uint8_t msg_value,
                                              uint32_t dest_index,uint32_t candidate_index)
     {
-      this->msg[dest_index] = candidate.msg[candidate_index];
+      this->msg.assign(dest_index,candidate_index,candidate.msg);
       this->score_nonblank[dest_index] = candidate.score_nonblank[candidate_index];
       this->score_blank[dest_index] = candidate.score_blank[candidate_index];
       this->score[dest_index] = candidate.score[candidate_index];
@@ -500,7 +573,7 @@ struct LVA_candidate_t_SOA:public LVA_path_t_SOA{//class to hold candidate infor
 inline __host__ void transfer(LVA_path_t_SOA &dst, LVA_path_t_SOA &src, cudaMemcpyKind c)
 {
   assert(dst.size == src.size);
-  cudaMemcpy(dst.msg, src.msg, sizeof(bitset_t) * src.size, c);
+  cudaMemcpy(dst.msg._a, src.msg._a, BITSET_BYTES(BITSET_SIZE) * src.size, c);
   cudaMemcpy(dst.score_nonblank, src.score_nonblank, sizeof(float) * src.size, c);
   cudaMemcpy(dst.score_blank, src.score_blank, sizeof(float) * src.size, c);
   cudaMemcpy(dst.score, src.score, sizeof(float) * src.size, c);
