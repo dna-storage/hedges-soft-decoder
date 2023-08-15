@@ -193,6 +193,7 @@ class HedgesBonitoBase:
 
         #setup forward arrays
         F=self._scorer.init_initial_state_F(scores) #initialize the state corresponding to the initial valid state of the trellis
+        
         current_scores = torch.full((self._H,),Log.zero)
         """
         Perform core algorithm.

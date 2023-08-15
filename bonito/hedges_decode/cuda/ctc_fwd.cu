@@ -17,6 +17,12 @@ __device__ __forceinline__ FLOAT logsumexp2(FLOAT a, FLOAT a1) {
   return maxa + log(exp(a-maxa) + exp(a1-maxa));
 }
 
+__device__ __forceinline__ FLOAT logdiffexp2(FLOAT a, FLOAT a1) {
+  FLOAT maxa = max2(a, a1);
+  return maxa + log(exp(a-maxa) - exp(a1-maxa));
+}
+
+
 
 __device__ __forceinline__ FLOAT sum3(FLOAT a, FLOAT a1, FLOAT a2) {return a + a1 + a2;}
 __device__ __forceinline__ FLOAT add(FLOAT a, FLOAT b) {return a + b;}
@@ -64,8 +70,6 @@ extern "C" __global__ void fwd_logspace(
   int blockH_EL = blockHidx*EL_stride;
   
 
-
-
   int64_t target = targets[Hidx*E*(L+target_score_pad)+ Eidx*(L+target_score_pad)+ (Lidx+target_score_pad)];
   extern __shared__ FLOAT smem[];
   if(Hidx>=H) return; //get rid of dead threads
@@ -103,6 +107,83 @@ extern "C" __global__ void fwd_logspace(
     smem_select=next_smem;
   }
 }
+
+
+
+extern "C" __global__ void fwd_logspace_reduce(
+					    const int64_t* __restrict__ targets,
+					    const FLOAT* __restrict__ scores,
+					    FLOAT* __restrict__ alpha_t,
+					    const FLOAT* __restrict__ mask,
+					    const FLOAT* __restrict__ F,
+              const FLOAT* __restrict__ out_scores,
+					    int lower_t_range,
+					    int upper_t_range,
+					    int H,
+					    int E,
+					    int L,
+					    int L_pad,
+					    int target_score_pad,
+					    int F_offset,
+					    int F_T,
+					    int abs_lower_t_range_offset
+					)
+
+
+
+{ //identical kernel to the base fwd_logspace kernel, but instead I am trying out what it i looks like if reduction is done n the same kernel call
+  int Lidx = threadIdx.x, Eidx = threadIdx.z, Hidx=threadIdx.y+blockIdx.x*blockDim.y , blockHidx=threadIdx.y;
+  int total_L = L+L_pad;
+  int HEL_stride = blockDim.y*E*total_L;
+  int EL_stride = E*total_L;
+  int blockH_EL = blockHidx*EL_stride;
+  FLOAT reduction_value=ZERO;
+  FLAOT previous_t_score=0;
+
+  int64_t target = targets[Hidx*E*(L+target_score_pad)+ Eidx*(L+target_score_pad)+ (Lidx+target_score_pad)];
+  extern __shared__ FLOAT smem[];
+  if(Hidx>=H) return; //get rid of dead threads
+  //smem needs to be initialized to time -1 so forward algorithm can go ahead
+  if(Lidx==0) smem[(lower_t_range%2)*HEL_stride+ blockHidx*EL_stride + Eidx*(total_L) + Lidx] = ZERO;
+  if(Lidx==1) smem[(lower_t_range%2)*HEL_stride+ blockHidx*EL_stride + Eidx*(total_L) + Lidx] = F[(lower_t_range+F_offset)*H+Hidx];
+  smem[(lower_t_range%2)*HEL_stride+blockHidx*EL_stride+Eidx*(total_L)+(Lidx+L_pad)] = ZERO; 
+  __syncthreads();
+   int fetch_ptr = 0;//index to keep track of what prefetch we use/need to update	
+  if(Lidx==1){ //try some asynchroniouse mem copies
+       for(int i=0; i<PREFETCH; i++) pfL1(&F[(lower_t_range+F_offset+1+i)*H+Hidx]);
+  }  
+  float mask_value = mask[Hidx*E*L+Eidx*L+Lidx];
+  int smem_select = lower_t_range%2;
+  for(int t=lower_t_range; t<upper_t_range;t++){
+    //perform core calculations for forward algorithm
+    FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back
+    int next_smem = ~smem_select&0x01;
+    int f_t = (t+1+F_offset);
+    a = smem[(smem_select)*HEL_stride+ blockH_EL + Eidx*total_L+ (Lidx+L_pad)];
+    a1 = smem[(smem_select)*HEL_stride+ blockH_EL + Eidx*total_L + (Lidx+L_pad-1)];
+    a2 =  MUL(smem[(smem_select)*HEL_stride + blockH_EL + Eidx*total_L+ (Lidx+L_pad-2)],mask_value);
+    score = scores[(abs_lower_t_range_offset+t)*NBASE+target];  	
+    final_score = MUL(score,SUM(a,a1,a2));
+    smem[(((next_smem)))*HEL_stride + blockHidx*EL_stride + Eidx*total_L+(Lidx+L_pad)]=final_score;
+    if(Lidx==0) smem[(next_smem)*HEL_stride+ blockHidx*EL_stride+ Eidx*(total_L)+ Lidx] = ZERO;
+    else if (Lidx==1){      
+      pfL1(&F[(f_t+PREFETCH)*H+Hidx]);
+      if(f_t<F_T) smem[(next_smem)*HEL_stride + blockHidx*EL_stride + Eidx*total_L + Lidx] = F[f_t*H + Hidx];
+      else smem[(next_smem)*HEL_stride + blockHidx*EL_stride + Eidx*total_L + Lidx] = ZERO;
+    }
+    __syncthreads();
+    //moved write to after sync 
+    if (Lidx==L-1){
+      alpha_t[ t*H*E+ Hidx*E+ Eidx] = final_score;
+      //reduce final score 
+      reduction_value = SUM2(reduction_value,MUL(final_score,log(1-exp(previous_t_score))));
+      previous_t_score=score;
+    }
+    out_scores[Hidx*E+Eidx]=reduction_value;
+    smem_select=next_smem;
+  }
+}
+
 
 
 extern "C" __global__ void fwd_logspace_align(

@@ -156,18 +156,84 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
             _,_2,L = targets.size()
         mask = torch.nn.functional.pad(targets[:,:,2:]==targets[:,:,:-2],(1,0),value=1)
         #calculate valid ranges of t to avoid unnecessary iterations
-        alpha_t = self._fwd_algorithm(targets,scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,lower_t_range-self._current_F_lower)
-        if PLOT and strand_index==(864+48): plot_scores(alpha_t,lower_t_range,upper_t_range,True,plot_list=[0])
-        out_scores=self._dot_product(targets,scores,lower_t_range,upper_t_range,alpha_t,using_window)       
+        alpha_t=self._fwd_algorithm(targets,scores,mask,F,out_scores,lower_t_range,upper_t_range,self._device,using_window,lower_t_range-self._current_F_lower)
+        #if PLOT and strand_index==(864+48): plot_scores(alpha_t,lower_t_range,upper_t_range,True,plot_list=[0])
+        #out_scores=self._dot_product(targets,scores,lower_t_range,upper_t_range,alpha_t,using_window)       
         #print(torch.max(out_scores))
         self._current_F_lower=lower_t_range #keeps track of most recent lower_t_range
-        return out_scores,alpha_t
+        return alpha_t,out_scoresfrom .plot import *
+import bonito.hedges_decode.cuda_utils as cu
+from .hedges_decode_utils import *
+
+import torch
+import dnastorage.codec.hedges_hooks as hedges_hooks
+import cupy as cp
+import os
+
+#get env variables
+PLOT = os.getenv("PLOT",False)
+
+class HedgesBonitoScoreBase:
+    def init_initial_state_F(self,scores:torch.Tensor)->torch.Tensor:
+        raise NotImplementedError()
+
+    def forward_step(self,scores:torch.Tensor,base_transitions:torch.Tensor,F:torch.Tensor,initial_bases:torch.Tensor,strand_index:int,
+                     nbits:int)->tuple[torch.Tensor,torch.Tensor]:
+        raise NotImplementedError()
+    def __init__(self,full_message_length:int,H:int,fastforward_seq:str,device:str,initial_state_index:int,letter_to_index:dict) -> None:
+        self._full_message_length = full_message_length
+        self._H = H
+        self._fastforward_seq=fastforward_seq
+        self._device =device
+        self._initial_state_index = initial_state_index
+        self._letter_to_index=letter_to_index
 
 
-class HedgesBonitoCTCGPU(HedgesBonitoCTC):
-    fwd_alg_kernel=cu.load_cupy_func("cuda/ctc_fwd.cu","fwd_logspace",FLOAT='float',SUM2='logsumexp2',SUM='logsumexp3',MUL='add',ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
-    dot_mul_kernel=cu.load_cupy_func("cuda/ctc_fwd.cu","dot_mul",FLOAT='float',SUM='logsumexp3',SUM2='logsumexp2',MUL='add',ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
-    dot_reduce_kernel=cu.load_cupy_func("cuda/reduce.cu","dot_reduce",FLOAT='float',REDUCE="logsumexp2",ZERO='{:E}'.format(Log.zero),ONE='{:E}'.format(Log.one))
+
+class HedgesBonitoCTC(HedgesBonitoScoreBase):
+    """
+    @brief      Hedges decoding on Bonito CTC output
+
+    @details    Implements the necessary methods to extract information out of Bonito scores when using the Bonito CTC model
+    """
+    def __init__(self, full_message_length: int, H: int, fastforward_seq: str, device: str, initial_state_index: int,
+                  letter_to_index: dict, window:int) -> None:
+        super().__init__(full_message_length, H, fastforward_seq, device, initial_state_index, letter_to_index)
+        self._window = window #indicates size of window to use
+        self._current_F_lower=0 #used for windowing
+
+    @classmethod
+    def _fwd_algorithm(cls,target_scores:torch.Tensor,mask:torch.Tensor,
+                       F:torch.Tensor,lower_t_range:int,upper_t_range:int,device,
+                       using_window:bool,pad:int)->torch.Tensor:
+        target_scores=target_scores[:,:,:,1:]
+        running_alpha_index=2
+        T,H,E,L=target_scores.size()
+        alpha_t = torch.full((T,H,E),Log.zero)
+        running_alpha =torch.full((H,E,L+2),Log.zero)
+        log_zeros = torch.full((H,E,L),Log.zero)
+        results_stack=torch.full((3,running_alpha.size(0),running_alpha.size(1),running_alpha.size(2)-running_alpha_index),Log.zero)
+        tmp_F=F
+        if not using_window:
+            r = torch.arange(lower_t_range,upper_t_range)
+            F_offset = int(-1)
+        else: #this is only necesssary when we are trying to store only the time range we are calculating
+            r = torch.arange(0,upper_t_range-lower_t_range)
+            F_offset = pad-1
+            tmp_F = torch.cat([F,torch.full((pad,F.size(1)),Log.zero)],dim=0)
+        for t in r:                
+            running_alpha[:,:,running_alpha_index-1] = tmp_F[t+F_offset,:][:,None]
+            results_stack[0,:,:,:] = running_alpha[:,:,running_alpha_index:]
+            results_stack[1,:,:,:] = running_alpha[:,:,running_alpha_index-1:-1]
+            results_stack[2,:,:,:] = torch.where(mask,log_zeros,running_alpha[:,:,running_alpha_index-2:-2])
+            running_alpha[:,:,running_alpha_index:]= Log.mul(target_scores[t,:,:,:],Log.sum(results_stack,dim=0))
+            alpha_t[t,:,:]=running_alpha[:,:,-1]
+        return alpha_t
+
+    @classmethod
+    def _dot_product(cls,target_scores,alpha_t)->torch.Tensor:
+        T,H,E,L = target_scores.size()
+        log_prob_no_transition=torch.nn.functional.pad(.format(Log.zero),ONE='{:E}'.format(Log.one))
    
 
     def __init__(self, full_message_length: int, H: int, fastforward_seq: str, device: str,
@@ -216,13 +282,14 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
     
     @classmethod
     def _fwd_algorithm(cls, targets: torch.Tensor,scores: torch.Tensor, mask: torch.Tensor,
-                       F: torch.Tensor, lower_t_range: int, upper_t_range: int,device,
+                       F: torch.Tensor,lower_t_range: int, upper_t_range: int,device,
                        using_window,pad)->torch.Tensor:
         H,E,L=targets.size()
         L-=1
+        out_scores = targets.new_zeros((H,E))
+
         #convert mask from bools to floats to avoid control flow in GPU kernel
         mask = torch.where(mask,torch.full(mask.size(),Log.zero,device=device),torch.full(mask.size(),Log.one,device=device))
-        w=F.to(device)
         if not using_window:
             r_1 = lower_t_range
             r_2 = upper_t_range
@@ -245,11 +312,10 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             h_per_block = max_T_per_block//(L*E)
             H_blocks = (H//h_per_block)+1
             #print(H_blocks)
-            HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,1,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,args=(targets.data_ptr(),scores.data_ptr(),y.data_ptr(),
-                                                                                                                                   mask.data_ptr(),w.data_ptr(),r_1,r_2,
-                                                                                                                                   H,E,L,2,1,f_offset,F.size(0),lower_t_range_offset))
-        return y
+            HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,1,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,
+                                              args=(targets.data_ptr(),scores.data_ptr(),y.data_ptr(),
+                                                    mask.data_ptr(),F.data_ptr(),out_scores.data_ptr(),r_1,r_2,
+                                                    H,E,L,2,1,f_offset,F.size(0),lower_t_range_offset))
+        return y,out_scores
         
     
-
-
