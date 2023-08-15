@@ -33,7 +33,7 @@ def check_hedges_params(hedges_params_dict)->None:
         
 
 
-#@profile
+@profile
 def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                   using_hedges_DNA_constraint:bool,alphabet:list,stride=1,
                   endpoint_seq:str="",window=0,trellis="base",mod_states=3)->dict:

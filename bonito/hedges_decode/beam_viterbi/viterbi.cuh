@@ -326,7 +326,7 @@ public:
     _byte_stride=n;
     // clear bitset
     if(is_host){
-      _a = new uint8_t[sizeof(uint8_t)*n*BITSET_BYTES(N)];
+      _a = new uint8_t[n*BITSET_BYTES(N)];
       for (int i = 0; i < BITSET_BYTES(N)*n; i++) _a[i] = 0;
     }
     else {
@@ -344,7 +344,7 @@ public:
     return *this;
   }
 
-  CUDA_CALLABLE_MEMBER cuda_bitset_matrix_t or_byte(uint32_t idx, uint8_t b)
+  CUDA_CALLABLE_MEMBER cuda_bitset_matrix_t& or_byte(uint32_t idx, uint8_t b)
   { // simple fast call that just ORs at the bottom of the array
     this->_a[idx] |= b;
     return *this;
@@ -352,14 +352,14 @@ public:
 
   CUDA_CALLABLE_MEMBER  void to_bitset(uint32_t idx,cuda_bitset_t<N>& b){
     for(uint32_t i=0; i<BITSET_BYTES(N); i++){
-        b._a[i] = _a[i*_byte_stride];
+        b._a[i] = _a[i*_byte_stride+idx];
     }
   }
 
-  CUDA_CALLABLE_MEMBER  void assign(uint32_t lhs_idx, uint32_t rhs_idx,cuda_bitset_matrix_t rhs){
+  CUDA_CALLABLE_MEMBER  void assign(uint32_t lhs_idx, uint32_t rhs_idx,const cuda_bitset_matrix_t& rhs){
     //copy bytes from other matrix 
     for(uint32_t i=0; i<BITSET_BYTES(N); i++){
-        this->_a[i*_byte_stride+lhs_idx] = rhs._a[i*rhs._byte_stride+rhs_idx];
+        this->_a[i*this->_byte_stride+lhs_idx] = rhs._a[i*rhs._byte_stride+rhs_idx];
     }
   }
 };
@@ -538,7 +538,7 @@ struct LVA_candidate_t_SOA:public LVA_path_t_SOA{//class to hold candidate infor
                             const float &score_blank_, const uint8_t &last_base_, bool stay, const context& hedge_context_,
                             uint32_t source_idx )
     { //assign values to candidate memory
-      msg.assign(pos,source_idx,msg);
+      msg.assign(pos,source_idx,msg_);
       score_nonblank[pos]=score_nonblank_; 
       score_blank[pos]=score_blank_;   
       last_base[pos]=last_base_;

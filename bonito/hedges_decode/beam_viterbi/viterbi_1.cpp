@@ -205,7 +205,7 @@ for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
   //std::cout<<"Kernel Initialized"<<std::endl;
   // forward Viterbi pass
   for (uint32_t t = 0; t < nblk; t++) {
-    std::cout<<std::dec<<"Block index "<<(int)t<<std::endl;
+    //std::cout<<std::dec<<"Block index "<<(int)t<<std::endl;
     //if(t>600) break;
     // swap prev and curr arrays
     std::swap(kernel_args.curr_best_paths, kernel_args.prev_best_paths);

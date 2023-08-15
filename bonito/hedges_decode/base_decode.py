@@ -21,6 +21,7 @@ def torch_get_index_dtype(states)->torch.dtype:
         return torch.int32
 
 class HedgesBonitoBase:
+    _trellis_connection_cache=[]
     get_new_F_kernel=cu.load_cupy_func("cuda/index_gather.cu","F_copy",FLOAT='float')
 
     """
@@ -100,12 +101,13 @@ class HedgesBonitoBase:
         self._L = self._full_message_length - len(self._fastforward_seq)#length of message-length side of matrices
         self._alphabet = alphabet #alphabet we are using
         self._letter_to_index = {_:i for i,_ in enumerate(self._alphabet)} #reverse map for the alphabet
-        print(self._letter_to_index)
+        #print(self._letter_to_index)
         self._trellis_connections=[]
         self._trellis_transition_values=[]
         self._max_bits=1 #max number of bits per base
         self._device=device
 
+         
         #initialize connections
         self._trellis_connections,self._trellis_transition_values = self.calculate_trellis_connections(range(0,self._max_bits+1),self._H) 
 
@@ -257,7 +259,7 @@ class HedgesBonitoBase:
             t=current_C
             current_C=other_C
             other_C=t
-        print(current_scores)
+        #print(current_scores)
         start_state = int(torch.argmax(current_scores))
         out_seq = self.fastforward_seq+self.string_from_backtrace(BT_index,BT_bases,start_state)
         if reverse: out_seq=complement(out_seq)     
@@ -304,6 +306,7 @@ class HedgesBonitoModBase(HedgesBonitoBase):
     
 
 class HedgesBonitoDelayStates(HedgesBonitoBase):
+    _mask_cache={}
     def __init__(self, hedges_param_dict: dict, hedges_bytes: bytes, using_hedges_DNA_constraint: bool, alphabet: list, device: str, score: str,
                  window:int=0,mod_states:int=3) -> None:
         self._mod = mod_states #represents the number of states per history state
@@ -311,7 +314,7 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
         #TODO: calculate static mask for delay states
         self._height = int(math.ceil(math.log2(self._mod)))
         self._mask = self._calculate_trellis_connections_mask(range(0,self._max_bits+1))
-
+    
     def get_trellis_state_length(self,hedges_param_dict,using_hedges_DNA_constraint)->int:
         return 2**hedges_param_dict["prev_bits"]*self._mod
     
@@ -321,6 +324,8 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
 
     def _calculate_trellis_connections_mask(self,bit_range:range)->list[torch.Tensor]:
         l = []
+        cache_key = tuple([self._max_bits+1,self._H,self._mod]) 
+        if cache_key in type(self)._mask_cache: return type(self)._mask_cache[cache_key]
         for nbits in bit_range:
             mask = torch.zeros((self._H,self._mod*2**nbits))
             for h in range(self._H):
@@ -343,6 +348,7 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
                     prev_state = base&0x1
                     mask[h,prev_state*self._mod+mod_from_prev_state]=1
             l.append(mask.bool())
+        type(self)._mask_cache[cache_key]=l
         return l
 
     def calculate_trellis_connections_mask(self,context:ContextManager,nbits:int,dead_states:np.ndarray)->torch.Tensor|None:
@@ -350,6 +356,9 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
         return self._mask[nbits]
 
     def calculate_trellis_connections(self, bit_range: range, trellis_states: int) -> tuple[list[torch.Tensor], ...]:
+        cache_key = tuple([self._max_bits+1,self._H,self._mod]) 
+        if cache_key in type(self)._trellis_connection_cache:
+            return type(self)._trellis_connection_cache[cache_key]
         #trellis connections when considering additional mod states
         index_list=[]
         value_list=[]
@@ -366,6 +375,7 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
                         incoming_state_value_matrix[h,prev_index_after_mod]=value
             index_list.append(incoming_states_matrix)
             value_list.append(incoming_state_value_matrix)
+        type(self)._trellis_connection_cache
         return index_list,value_list
     
 
