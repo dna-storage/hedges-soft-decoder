@@ -4,9 +4,9 @@ source /home/${USER}/.bashrc
 module unload cuda
 conda activate bonito_cuda
 
-
-window_size=(0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9)
-strand_fast5=("221118_dna_volkel_strand1_fast5_10k_subset" "221118_dna_volkel_strand2_fast5_10k_subset")
+PREFIX="squigulator_"
+window_size=(0)
+strand_fast5=("221118_dna_volkel_strand1_fast5_10k_squigulator" "221118_dna_volkel_strand2_fast5_10k_squigulator")
 strand_byte_index=(0 8)
 VERSION=""
 GPU="rtx2060super"
@@ -20,8 +20,8 @@ do
 	real_strandId=$((strandId+1))
 	fast5_path=${strand_fast5[$strandId]}
 	byte_index=${strand_byte_index[$strandId]}
-	out_file="reduce_fix_bonito_hedges_strand${real_strandId}_window--${window}.fastq"
-	err_file="reduce_fix_bonito_hedges_strand${real_strandId}_window--${window}.err"
+	out_file=${PREFIX}"bonito_hedges_strand${real_strandId}_window--${window}.fastq"
+	err_file=${PREFIX}"bonito_hedges_strand${real_strandId}_window--${window}.err"
 	echo "--------------------------------------------------------------"
 	echo "Strand ID ${real_strandId}"
 	echo "Fast5 Path ${fast5_path}"
