@@ -116,7 +116,7 @@ extern "C" __global__ void fwd_logspace_reduce(
 					    FLOAT* __restrict__ alpha_t,
 					    const FLOAT* __restrict__ mask,
 					    const FLOAT* __restrict__ F,
-              const FLOAT* __restrict__ out_scores,
+              				    FLOAT* __restrict__ out_scores,
 					    int lower_t_range,
 					    int upper_t_range,
 					    int H,
@@ -138,7 +138,7 @@ extern "C" __global__ void fwd_logspace_reduce(
   int EL_stride = E*total_L;
   int blockH_EL = blockHidx*EL_stride;
   FLOAT reduction_value=ZERO;
-  FLAOT previous_t_score=0;
+  FLOAT next_t_score=ZERO;
 
   int64_t target = targets[Hidx*E*(L+target_score_pad)+ Eidx*(L+target_score_pad)+ (Lidx+target_score_pad)];
   extern __shared__ FLOAT smem[];
@@ -155,14 +155,16 @@ extern "C" __global__ void fwd_logspace_reduce(
   float mask_value = mask[Hidx*E*L+Eidx*L+Lidx];
   int smem_select = lower_t_range%2;
   for(int t=lower_t_range; t<upper_t_range;t++){
+    FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back    
+    score = scores[(abs_lower_t_range_offset+t)*NBASE+target];  	
+    if(t<upper_t_range-1) next_t_score=scores[(abs_lower_t_range_offset+t+1)*NBASE+target];
+    else  next_t_score=ZERO;
     //perform core calculations for forward algorithm
-    FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back
     int next_smem = ~smem_select&0x01;
     int f_t = (t+1+F_offset);
     a = smem[(smem_select)*HEL_stride+ blockH_EL + Eidx*total_L+ (Lidx+L_pad)];
     a1 = smem[(smem_select)*HEL_stride+ blockH_EL + Eidx*total_L + (Lidx+L_pad-1)];
     a2 =  MUL(smem[(smem_select)*HEL_stride + blockH_EL + Eidx*total_L+ (Lidx+L_pad-2)],mask_value);
-    score = scores[(abs_lower_t_range_offset+t)*NBASE+target];  	
     final_score = MUL(score,SUM(a,a1,a2));
     smem[(((next_smem)))*HEL_stride + blockHidx*EL_stride + Eidx*total_L+(Lidx+L_pad)]=final_score;
     if(Lidx==0) smem[(next_smem)*HEL_stride+ blockHidx*EL_stride+ Eidx*(total_L)+ Lidx] = ZERO;
@@ -175,16 +177,14 @@ extern "C" __global__ void fwd_logspace_reduce(
     //moved write to after sync 
     if (Lidx==L-1){
       alpha_t[ t*H*E+ Hidx*E+ Eidx] = final_score;
-      //reduce final score 
-      reduction_value = SUM2(reduction_value,MUL(final_score,log(1-exp(previous_t_score))));
-      previous_t_score=score;
     }
-    out_scores[Hidx*E+Eidx]=reduction_value;
+    //reduce final score 
+    reduction_value = SUM2(reduction_value,MUL(final_score,log(1-exp(next_t_score))));
     smem_select=next_smem;
   }
+  if(Lidx==L-1) out_scores[Hidx*E+Eidx]=reduction_value;
+
 }
-
-
 
 extern "C" __global__ void fwd_logspace_align(
 					    const FLOAT* __restrict__ target_scores,

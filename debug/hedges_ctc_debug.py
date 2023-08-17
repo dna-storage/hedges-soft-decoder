@@ -15,4 +15,5 @@ if __name__ =="__main__":
         print(scores.size())
         x=hd.hedges_decode(read,{"scores":scores},sys.argv[2],b,False,alphabet,1,endpoint_str,window=0,trellis="beam_1")
         print(x['sequence'])
+        exit(1)
         

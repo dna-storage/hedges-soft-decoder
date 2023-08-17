@@ -35,8 +35,6 @@ def basecall(model, reads, beamsize=5, chunksize=0, overlap=0, batchsize=1, qsco
         (read, {'scores': stitch(v, chunksize, overlap, len(read.signal), model.stride)}) for read, v in scores
     )
 
-    
-
     if kwargs.get("hedges_params",None)!=None:
         alphabet=model.alphabet
         decoder = partial(hedges_decode,hedges_params = kwargs["hedges_params"],hedges_bytes=kwargs["hedges_bytes"],
@@ -45,7 +43,7 @@ def basecall(model, reads, beamsize=5, chunksize=0, overlap=0, batchsize=1, qsco
     else:
         decoder = partial(decode, decode=model.decode, beamsize=beamsize, qscores=qscores, stride=model.stride)
     #pickle.dump([(read,s['scores']) for read,s in scores],open("debug_scores","wb+"))
-    basecalls = process_map(decoder, scores, n_proc=8)
+    basecalls = process_map(decoder, scores, n_proc=kwargs["processes"])
     return basecalls
 
 
@@ -60,7 +58,7 @@ def compute_scores(model, batch):
     return probs.cpu().to(torch.float32)
 
 
-def decode(scores, decode, beamsize=5, qscores=False, stride=1):
+def decode(key,scores, decode, beamsize=5, qscores=False, stride=1):
     """
     Convert the network scores into a sequence.
     """

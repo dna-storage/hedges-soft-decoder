@@ -33,7 +33,8 @@ def check_hedges_params(hedges_params_dict)->None:
         
 
 
-@profile
+
+#@profile
 def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                   using_hedges_DNA_constraint:bool,alphabet:list,stride=1,
                   endpoint_seq:str="",window=0,trellis="base",mod_states=3)->dict:
@@ -53,12 +54,12 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
 
     gc.collect()
     torch.cuda.empty_cache()
-    #torch.cuda.synchronize()
     start_time=time.time()
     try:
         with torch.no_grad():
             scores=scores["scores"].to("cpu")
             assert(hedges_params!=None and hedges_bytes!=None)
+            print(scores.size(0))
 
             try:
                 hedges_params_dict = json.load(open(hedges_params,'r'))
@@ -81,7 +82,6 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
 
             #create aligner
             aligner = AlignCTCGPU(alphabet,device="cuda:0")
-
             f_endpoint_upper_index=0
             r_endpoint_lower_index=len(scores)
             f_endpoint_score=Log.one
@@ -98,26 +98,26 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
             Because we
             """
             seq=""
-            #print("hedges f score {}".format(f_hedges_score))
-            #print("endpoint f score {}".format(f_endpoint_score))
-            #print("hedges r score {}".format(r_hedges_score))
-            #print("endpoint r score {}".format(r_endpoint_score))
+            print("hedges f score {}".format(f_hedges_score))
+            print("endpoint f score {}".format(f_endpoint_score))
+            print("hedges r score {}".format(r_hedges_score))
+            print("endpoint r score {}".format(r_endpoint_score))
             if Log.mul(f_hedges_score,f_endpoint_score)>Log.mul(r_endpoint_score,r_hedges_score):
-                print("IS FORWARD")
+                #print("IS FORWARD")
                 if decoder.is_beam: s=scores[f_endpoint_upper_index:f_hedges_bytes_lower_index]
                 else:s=scores[f_endpoint_upper_index:f_hedges_bytes_upper_index]
                 #print(" {} {}".format(f_endpoint_upper_index,f_hedges_bytes_upper_index))
                 s=s.flip([0])
                 complement_trellis=False
-                print("Score length {}".format(s.size(0)), file=sys.stderr)
+                #print("Score length {}".format(s.size(0)), file=sys.stderr)
                 if(s.size(0)==0 or s.size(0)<decoder._full_message_length): seq="N"
                 else:
                     if window>0 and window<1: decoder.window=int(window*s.size(0)/2) 
                     seq = decoder.decode(s,complement_trellis)
             else:
 
-                print("IS REVERSE")
-                print("Hedges upper - lower {}".format(r_hedges_bytes_upper_index-r_hedges_bytes_lower_index))
+                #print("IS REVERSE")
+                #print("Hedges upper - lower {}".format(r_hedges_bytes_upper_index-r_hedges_bytes_lower_index))
                 if decoder.is_beam: s=scores[r_hedges_bytes_upper_index:r_endpoint_lower_index]
                 else: s=scores[r_hedges_bytes_lower_index:r_endpoint_lower_index]
                 if(s.size(0)==0 or s.size(0)<decoder._full_message_length): seq="N"
@@ -126,7 +126,7 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                     #print("{} {}".format(r_hedges_bytes_lower_index,r_endpoint_lower_index))
                     complement_trellis=True
                     decoder.fastforward_seq = complement(decoder.fastforward_seq)
-                    print("Score length {}".format(s.size(0)), file=sys.stderr)
+                    #print("Score length {}".format(s.size(0)), file=sys.stderr)
                     if window>0 and window<1: decoder.window=int(window*s.size(0)/2)
                     seq = decoder.decode(s,complement_trellis)
             #try to clean up memory

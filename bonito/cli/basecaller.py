@@ -140,7 +140,8 @@ def main(args):
         rna=args.rna,
         window=args.window,
         trellis=args.trellis,
-        mod_states=args.mod_states
+        mod_states=args.mod_states,
+        processes=args.processes
     )
     
     if mods_model is not None:
@@ -226,4 +227,5 @@ def argparser():
     parser.add_argument("--mod_states",action="store",type=int,default=3,help="number of states per history")
     parser.add_argument("--lower_index",action="store",type=int,default=0,help="Index to start for basecalling in the data set, INCLUSIVE")
     parser.add_argument("--upper_index",action="store",type=int,default=10**9,help="Index to stop for basecalling, NOT_INCLUSIVE")
+    parser.add_argument("--processes",action="store",type=int,default=1,help="processes to use for parallelizing basecalling")
     return parser

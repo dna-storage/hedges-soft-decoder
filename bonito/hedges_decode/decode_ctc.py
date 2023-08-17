@@ -223,7 +223,7 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
         #convert mask from bools to floats to avoid control flow in GPU kernel
         mask = torch.where(mask,torch.full(mask.size(),Log.zero,device=device),torch.full(mask.size(),Log.one,device=device))
         w=F.to(device)
-        out_scores = targets.new_zeros((H,E))
+        out_scores = targets.new_zeros((H,E),dtype=torch.float)
         if not using_window:
             r_1 = lower_t_range
             r_2 = upper_t_range

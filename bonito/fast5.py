@@ -30,7 +30,11 @@ class Read(bonito.reader.Read):
 
         tracking_id = read.handle[read.global_key + 'tracking_id'].attrs
 
-        self.sample_id = tracking_id['sample_id']
+        try:
+            self.sample_id = tracking_id['sample_id']
+        except KeyError:
+            self.sample_id = 'unset'
+        
         if type(self.sample_id) in (bytes, np.bytes_):
             self.sample_id = self.sample_id.decode()
 
@@ -43,7 +47,14 @@ class Read(bonito.reader.Read):
         if type(self.flow_cell_id) in (bytes, np.bytes_):
             self.flow_cell_id = self.flow_cell_id.decode('ascii')
 
-        self.device_id = tracking_id['device_id']
+
+
+
+        try:
+            self.device_id = tracking_id['device_id']
+        except KeyError:
+            self.device_id = 'unset'
+        
         if type(self.device_id) in (bytes, np.bytes_):
             self.device_id = self.device_id.decode('ascii')
 

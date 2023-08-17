@@ -8,6 +8,7 @@
 #include <thrust/advance.h>
 #include <thrust/copy.h>
 
+
 __device__ __forceinline__ uint8_t base2int(char base) {
   switch (base)
   {
@@ -39,7 +40,9 @@ __device__ __forceinline__ char complement(char base) {
   }
 }
 
-__global__ void beam_kernel_1(kernel_values_t* args){
+__global__ void 
+__launch_bounds__(512,2)
+beam_kernel_1(kernel_values_t* args){
   uint32_t st_pos = threadIdx.x+blockDim.x*blockIdx.x;
   uint32_t st_conv = threadIdx.y+blockDim.y*blockIdx.y;
   uint32_t nstate_conv = args->nstate_conv;
@@ -202,10 +205,9 @@ __global__ void beam_kernel_1(kernel_values_t* args){
 
 __host__ void call_beam_kernel_1(kernel_values_t& args){
     //Determine the sizing of kernel grid
-    int dim  = 16;
-    dim3 threads_per_block(dim,dim,1); //using 32x32 blocks (x-> positions) (y-> convolutional)
-    assert(args.nstate_conv%dim==0);
-    uint32_t H_blocks = args.nstate_conv/dim;
+    int dim  = 512;   
+    dim3 threads_per_block(dim,1,1); //using 32x32 blocks (x-> positions) (y-> convolutional)
+    uint32_t H_blocks = args.nstate_conv;
     uint32_t pos_blocks = (args.nstate_pos/dim)+1; //+1 to ensure there's enough
     dim3 blocks(pos_blocks,H_blocks,1);
     //copy args to gpu
