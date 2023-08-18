@@ -158,8 +158,6 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
         #calculate valid ranges of t to avoid unnecessary iterations
         alpha_t,out_scores = self._fwd_algorithm(targets,scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,lower_t_range-self._current_F_lower)
         #if PLOT and strand_index==(864+48): plot_scores(alpha_t,lower_t_range,upper_t_range,True,plot_list=[0])
-        #out_scores=self._dot_product(targets,scores,lower_t_range,upper_t_range,alpha_t,using_window)       
-        #print(torch.max(out_scores))
         self._current_F_lower=lower_t_range #keeps track of most recent lower_t_range
         return out_scores,alpha_t
 
@@ -242,7 +240,7 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             #L can't be moved because of thread sync. dependency
             #1024/L = H*E
             #E is typically small (at most 2 for now), so we cajust do 1024//(L*E) for H threads per block
-            max_T_per_block=128
+            max_T_per_block=128 #max threads to have per block
             h_per_block = max_T_per_block//(L*E)
             H_blocks = (H//h_per_block)+1
             #print(H_blocks)
