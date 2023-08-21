@@ -236,7 +236,7 @@ for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
   candidate_paths.free();
   prev_best_paths.free();
 
-  std::cout<<"Dev to host"<<std::endl;
+  //std::cout<<"Dev to host"<<std::endl;
 
   //reframe the SOA to an AOS to make data better for CPU
   LVA_path_t* curr_best_paths_AOS = new LVA_path_t[nstate_total*list_size];
@@ -276,9 +276,9 @@ for (uint8_t nbits = 0; nbits < NBIT_RANGE; nbits++) {
   for (uint32_t list_pos = 0; list_pos < list_size; list_pos++) {
     decoded_msg_list.push_back(LVA_path_list_final[list_pos].msg);
     // FOR DEBUGGING
-        std::cout << "score: " << LVA_path_list_final[list_pos].score << "\n";
+    //std::cout << "score: " << LVA_path_list_final[list_pos].score << "\n";
         //for (auto b : decoded_msg_list.back()) std::cout << b;
-        std::cout << "\n\n";
+        ///std::cout << "\n\n";
   }
   delete[] curr_best_paths_AOS;
   return decoded_msg_list;

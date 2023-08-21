@@ -4,15 +4,15 @@ source /home/${USER}/.bashrc
 module unload cuda
 conda activate bonito_cuda
 
-PREFIX="squigulator_"
+PREFIX=""
 window_size=0
-strand_fast5=("221118_dna_volkel_strand1_fast5_10k_squigulator" "221118_dna_volkel_strand2_fast5_10k_squigulator")
-declare -a li_strand1=(0)
-declare -a li_strand2=(0)
+strand_fast5=("221118_dna_volkel_strand1_fast5_10k_subset" "221118_dna_volkel_strand2_fast5_10k_subset")
+declare -a li_strand1=($(seq 8000 200 9800))
+declare -a li_strand2=($(seq 8000 200 9800))
 declare -a lower_indexes=("(${li_strand1[*]@Q})" "(${li_strand2[*]@Q})")
 
-declare -a ui_strand1=(400)
-declare -a ui_strand2=(400)
+declare -a ui_strand1=($(seq 8200 200 10000))
+declare -a ui_strand2=($(seq 8200 200 10000))
 declare -a upper_indexes=("(${ui_strand1[*]@Q})" "(${ui_strand2[*]@Q})")
 
 strand_byte_index=(0 8)
@@ -41,6 +41,6 @@ do
 	    echo "Lower Index $lower_index"
 	    echo "Upper Index $upper_index"
             echo "--------------------------------------------------------------"
-            sbatch --time "24:00:00" --exclude="c[78-94],c[60]"  -J mod_experiments_${window_size}_${mod} -o $PAUL_NANOPORE_DATA/${out_file} -e $PAUL_NANOPORE_DATA/${err_file} -N 1 -n 1 -p ${GPU} --wrap "bonito basecaller dna_r9.4.1@v2 $PAUL_NANOPORE_DATA/${fast5_path} --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes 204 ${byte_index} --hedges_params $PAUL_NANOPORE_DATA/hedges_decode_ctc_debug/hedges_options.json --disable_half --window ${window_size} --trellis beam_1 --lower_index ${lower_index} --upper_index ${upper_index} --processes 1"
+            sbatch --time "24:00:00" --exclude="c[78-94],c[60]"  -J beam_experiments -o $PAUL_NANOPORE_DATA/${out_file} -e $PAUL_NANOPORE_DATA/${err_file} -N 1 -n 1 -p ${GPU} --wrap "bonito basecaller dna_r9.4.1@v2 $PAUL_NANOPORE_DATA/${fast5_path} --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes 204 ${byte_index} --hedges_params $PAUL_NANOPORE_DATA/hedges_decode_ctc_debug/hedges_options.json --disable_half --window ${window_size} --trellis beam_1 --lower_index ${lower_index} --upper_index ${upper_index} --processes 1"
     done
 done

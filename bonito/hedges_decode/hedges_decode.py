@@ -103,10 +103,10 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
             Because we
             """
             seq=""
-            logger.info("hedges f score {}".format(f_hedges_score))
-            logger.info("endpoint f score {}".format(f_endpoint_score))
-            logger.info("hedges r score {}".format(r_hedges_score))
-            logger.info("endpoint r score {}".format(r_endpoint_score))
+            logger.info("hedges f score: {}".format(f_hedges_score))
+            logger.info("endpoint f score: {}".format(f_endpoint_score))
+            logger.info("hedges r score: {}".format(r_hedges_score))
+            logger.info("endpoint r score: {}".format(r_endpoint_score))
             if Log.mul(f_hedges_score,f_endpoint_score)>Log.mul(r_endpoint_score,r_hedges_score):
                 logger.info("IS FORWARD")
                 if decoder.is_beam: s=scores[f_endpoint_upper_index:f_hedges_bytes_lower_index]
@@ -114,7 +114,7 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                 #print(" {} {}".format(f_endpoint_upper_index,f_hedges_bytes_upper_index))
                 s=s.flip([0])
                 complement_trellis=False
-                logger.info("Score length after alignment {}".format(s.size(0)))
+                logger.info("Score length after alignment: {}".format(s.size(0)))
                 if(s.size(0)==0 or s.size(0)<decoder._full_message_length): seq="N"
                 else:
                     if window>0 and window<1: decoder.window=int(window*s.size(0)/2) 
@@ -131,7 +131,7 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
                     #print("{} {}".format(r_hedges_bytes_lower_index,r_endpoint_lower_index))
                     complement_trellis=True
                     decoder.fastforward_seq = complement(decoder.fastforward_seq)
-                    logger.info("Score length after alignment{}".format(s.size(0)), file=sys.stderr)
+                    logger.info("Score length after alignment: {}".format(s.size(0)))
                     if window>0 and window<1: decoder.window=int(window*s.size(0)/2)
                     seq = decoder.decode(s,complement_trellis)
             #try to clean up memory
