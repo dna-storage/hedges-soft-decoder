@@ -103,18 +103,18 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
             lower_t_range =0
             upper_t_range = T
         T_range = upper_t_range-lower_t_range
-        F = torch.full((T_range,self._H),Log.zero)
+        F = scores.new_full((T_range,self._H),Log.zero)
         #nothing to do if there is no initial strand
         if len(self._fastforward_seq)==0: return F
         strand_indexes = HedgesBonitoCTC.string_to_indexes(self._fastforward_seq,self._letter_to_index)
         padded_strand = HedgesBonitoCTC.insert_blanks(strand_indexes)[:-1] #leave off last blank due to viterbi branch path nature
-        strand_index_matrix = padded_strand[None,:].expand(T_range,-1)#TxL matrix
+        strand_index_matrix = padded_strand[None,:].expand(T_range,-1).to(scores.get_device())#TxL matrix
         scores_matrix = scores[lower_t_range:upper_t_range,:].gather(1,strand_index_matrix) #get log probabilities for each base at each time point
         _,L = scores_matrix.size()
-        running_alpha = torch.full((L+2,),Log.zero) #1 dimensional tensor that tracks alpha for all characters at time t
+        running_alpha = scores.new_full((L+2,),Log.zero) #1 dimensional tensor that tracks alpha for all characters at time t
         #need a mask matrix for repeats
-        mask = torch.nn.functional.pad(padded_strand[2:]==padded_strand[:-2],(2,0),value=1)
-        log_zeros = torch.full((L,),Log.zero)
+        mask = torch.nn.functional.pad(padded_strand[2:]==padded_strand[:-2],(2,0),value=1).to(scores.get_device())
+        log_zeros = scores.new_full((L,),Log.zero)
         #iterate over T dimension and calcualte alphas
         running_alpha[2]=Log.one
         for t in torch.arange(T_range):

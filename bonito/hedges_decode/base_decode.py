@@ -142,7 +142,6 @@ class HedgesBonitoBase:
     #helps transfer F scores more efficiently than re-arangement
     def get_new_F(self,temp_f_outgoing:torch.Tensor,trellis_incoming_indexes:torch.Tensor,
                   trellis_incoming_value:torch.Tensor,value_of_max_scores:torch.Tensor)->torch.Tensor:
-        #torch.cuda.synchronize(0)
         assert torch.cuda.is_available() #make sure we have cuda for this class
         return_F = torch.full((temp_f_outgoing.size(0),temp_f_outgoing.size(1)),0,device=self._device,dtype=torch.float)
         with cp.cuda.Device(0):  
@@ -190,9 +189,10 @@ class HedgesBonitoBase:
         C2 = ContextManager(self._H,self._global_hedge_state_init)
         current_C=C1
         other_C=C2
+        scores_gpu= scores.to(self._device)
 
         #setup forward arrays
-        F=self._scorer.init_initial_state_F(scores) #initialize the state corresponding to the initial valid state of the trellis
+        F=self._scorer.init_initial_state_F(scores_gpu) #initialize the state corresponding to the initial valid state of the trellis
         
         current_scores = torch.full((self._H,),Log.zero)
         """
@@ -203,7 +203,6 @@ class HedgesBonitoBase:
         4. Calculate scores for edges into _H and take the max score, updating the state's C/BT/F matrices approriately
         """
         sub_length = self._full_message_length-self._L
-        scores_gpu= scores.to(self._device)
         F=F.to(self._device)
         H_range=torch.arange(self._H)
         pattern_counter=0
