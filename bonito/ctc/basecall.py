@@ -11,6 +11,7 @@ from bonito.util import mean_qscore_from_qstring
 from bonito.util import chunk, stitch, batchify, unbatchify, permute
 
 from bonito.hedges_decode.hedges_decode import hedges_decode
+from bonito.hedges_decode.hedges_decode_utils import hedges_batch_scores
 
 import pickle
 import sys
@@ -18,6 +19,14 @@ import gc
 import os
 from itertools import islice
 
+
+def unpack_basecalls(basecalls): #splits basecalls up if the basecall process was batched
+    for k,v in basecalls:
+        if isinstance(v,dict):
+           yield k,v
+        else:
+            for sub_k,sub_v in zip(k,v):
+                yield sub_k,sub_v
 
 
 
@@ -40,10 +49,11 @@ def basecall(model, reads, beamsize=5, chunksize=0, overlap=0, batchsize=1, qsco
         decoder = partial(hedges_decode,hedges_params = kwargs["hedges_params"],hedges_bytes=kwargs["hedges_bytes"],
                           using_hedges_DNA_constraint=kwargs["hedges_using_DNA_constraint"],alphabet=alphabet,endpoint_seq=kwargs["strand_pad"],window=kwargs["window"],
                           trellis=kwargs["trellis"],mod_states=kwargs["mod_states"])
+        scores=hedges_batch_scores(scores,kwargs["hedges_batchsize"])
     else:
         decoder = partial(decode, decode=model.decode, beamsize=beamsize, qscores=qscores, stride=model.stride)
-    #pickle.dump([(read,s['scores']) for read,s in scores],open("debug_scores","wb+"))
     basecalls = process_map(decoder, scores, n_proc=kwargs["processes"])
+    basecalls = unpack_basecalls(basecalls)
     return basecalls
 
 

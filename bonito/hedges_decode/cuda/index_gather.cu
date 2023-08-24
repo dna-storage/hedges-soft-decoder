@@ -56,13 +56,14 @@ extern "C" __global__ void F_copy(
     int E)   
 {   
      //h_index refers to return_F state we are working on
+    int Nidx = blockIdx.z;
     int t = blockIdx.y*blockDim.y+threadIdx.y;
     int h_index = blockIdx.x*blockDim.x+threadIdx.x;
     if(h_index>=H || t>=T) return;
 
-    int64_t max_index = value_of_max_scores[h_index];
+    int64_t max_index = value_of_max_scores[Nidx*H+h_index];
     int64_t incoming_index = trellis_incoming_indexes[h_index*trellis_dim_1+max_index];
     int64_t incoming_value = trellis_incoming_value[h_index*trellis_dim_1+max_index];
-    return_F[t*H+h_index] = temp_f_outgoing[t*H*E+incoming_index*E+incoming_value]; 
+    return_F[Nidx*T*H+t*H+h_index] = temp_f_outgoing[Nidx*T*H*E+t*H*E+incoming_index*E+incoming_value]; 
    
 }

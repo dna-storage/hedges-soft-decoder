@@ -116,7 +116,7 @@ extern "C" __global__ void fwd_logspace_reduce(
 					    FLOAT* __restrict__ alpha_t,
 					    const FLOAT* __restrict__ mask,
 					    const FLOAT* __restrict__ F,
-              				    FLOAT* __restrict__ out_scores,
+              FLOAT* __restrict__ out_scores,
 					    int lower_t_range,
 					    int upper_t_range,
 					    int H,
@@ -126,21 +126,23 @@ extern "C" __global__ void fwd_logspace_reduce(
 					    int target_score_pad,
 					    int F_offset,
 					    int F_T,
+              int T,
 					    int abs_lower_t_range_offset
 					)
 
 
 
 { //identical kernel to the base fwd_logspace kernel, but instead I am trying out what it i looks like if reduction is done n the same kernel call
-  int Lidx = threadIdx.x, Eidx = threadIdx.z, Hidx=threadIdx.y+blockIdx.x*blockDim.y , blockHidx=threadIdx.y;
-  int total_L = L+L_pad;
-  int HEL_stride = blockDim.y*E*total_L;
-  int EL_stride = E*total_L;
-  int blockH_EL = blockHidx*EL_stride;
+  const int Nidx = blockIdx.y;
+  const int Lidx = threadIdx.x, Eidx = threadIdx.z, Hidx=threadIdx.y+blockIdx.x*blockDim.y , blockHidx=threadIdx.y;
+  const int total_L = L+L_pad;
+  const int HEL_stride = blockDim.y*E*total_L;
+  const int EL_stride = E*total_L;
+  const int blockH_EL = blockHidx*EL_stride;
   FLOAT reduction_value=ZERO;
   FLOAT next_t_score=ZERO;
 
-  int64_t target = targets[Hidx*E*(L+target_score_pad)+ Eidx*(L+target_score_pad)+ (Lidx+target_score_pad)];
+  int64_t target = targets[Nidx*H*E*(L+target_score_pad)+Hidx*E*(L+target_score_pad)+ Eidx*(L+target_score_pad)+ (Lidx+target_score_pad)];
   extern __shared__ FLOAT smem[];
   if(Hidx>=H) return; //get rid of dead threads
   //smem needs to be initialized to time -1 so forward algorithm can go ahead
@@ -150,14 +152,14 @@ extern "C" __global__ void fwd_logspace_reduce(
   __syncthreads();
    int fetch_ptr = 0;//index to keep track of what prefetch we use/need to update	
   if(Lidx==1){ //try some asynchroniouse mem copies
-       for(int i=0; i<PREFETCH; i++) pfL1(&F[(lower_t_range+F_offset+1+i)*H+Hidx]);
+       for(int i=0; i<PREFETCH; i++) pfL1(&F[Nidx*F_T*H+(lower_t_range+F_offset+1+i)*H+Hidx]);
   }  
-  float mask_value = mask[Hidx*E*L+Eidx*L+Lidx];
+  float mask_value = mask[Nidx*E*L+Hidx*E*L+Eidx*L+Lidx];
   int smem_select = lower_t_range%2;
   for(int t=lower_t_range; t<upper_t_range;t++){
     FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back    
-    score = scores[(abs_lower_t_range_offset+t)*NBASE+target];  	
-    if(t<upper_t_range-1) next_t_score=scores[(abs_lower_t_range_offset+t+1)*NBASE+target];
+    score = scores[Nidx*T*NBASE+(abs_lower_t_range_offset+t)*NBASE+target];  	
+    if(t<upper_t_range-1) next_t_score=scores[Nidx*T*NBASE+(abs_lower_t_range_offset+t+1)*NBASE+target];
     else  next_t_score=ZERO;
     //perform core calculations for forward algorithm
     int next_smem = ~smem_select&0x01;
@@ -169,57 +171,62 @@ extern "C" __global__ void fwd_logspace_reduce(
     smem[(((next_smem)))*HEL_stride + blockHidx*EL_stride + Eidx*total_L+(Lidx+L_pad)]=final_score;
     if(Lidx==0) smem[(next_smem)*HEL_stride+ blockHidx*EL_stride+ Eidx*(total_L)+ Lidx] = ZERO;
     else if (Lidx==1){      
-      pfL1(&F[(f_t+PREFETCH)*H+Hidx]);
-      if(f_t<F_T) smem[(next_smem)*HEL_stride + blockHidx*EL_stride + Eidx*total_L + Lidx] = F[f_t*H + Hidx];
+      pfL1(&F[Nidx*H*F_T+(f_t+PREFETCH)*H+Hidx]);
+      if(f_t<F_T) smem[(next_smem)*HEL_stride + blockHidx*EL_stride + Eidx*total_L + Lidx] = F[Nidx*H*F_T+f_t*H + Hidx];
       else smem[(next_smem)*HEL_stride + blockHidx*EL_stride + Eidx*total_L + Lidx] = ZERO;
     }
     __syncthreads();
     //moved write to after sync 
     if (Lidx==L-1){
-      alpha_t[ t*H*E+ Hidx*E+ Eidx] = final_score;
+      alpha_t[Nidx*H*(upper_t_range-lower_t_range)*E+t*H*E+ Hidx*E+ Eidx] = final_score;
     }
     //reduce final score 
     reduction_value = SUM2(reduction_value,MUL(final_score,log(1-exp(next_t_score))));
     smem_select=next_smem;
   }
-  if(Lidx==L-1) out_scores[Hidx*E+Eidx]=reduction_value;
+  if(Lidx==L-1) out_scores[Nidx*H*E+Hidx*E+Eidx]=reduction_value;
 
 }
 
 extern "C" __global__ void fwd_logspace_align(
-					    const FLOAT* __restrict__ target_scores,
+					    const FLOAT* __restrict__ scores,
+              const int64_t* __restrict__ targets,
 					    FLOAT* __restrict__ F,
 					    long* __restrict__ BT,
 					    const FLOAT* __restrict__ mask,
 					    int T,
 					    int L,
-					    int L_pad
+					    int L_pad,
+              int N
 					)
 {
   int Lidx = threadIdx.x;
+  int Nidx = threadIdx.y+blockDim.y*blockIdx.x;
+  if(Nidx>=N) return;
+  int64_t target = targets[Nidx*L+Lidx];
   int total_L = L+L_pad;
   extern __shared__ FLOAT smem[];
-  if(Lidx==0 || Lidx==1) smem[Lidx] = ZERO;
-  if(Lidx==0) smem[Lidx+L_pad]=ONE;
-  else smem[Lidx+L_pad] = ZERO;
+  if(Lidx==0 || Lidx==1) smem[Nidx*2*total_L+Lidx] = ZERO;
+  if(Lidx==0) smem[Nidx*2*total_L+Lidx+L_pad]=ONE;
+  else smem[Nidx*2*total_L+Lidx+L_pad] = ZERO;
   __syncthreads();
   for(int t=0;t<T;t++){
     //perform core calculations for forward algorithm
     FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back
-    score = target_scores[t*(L)+Lidx];
-    a = MUL(score,smem[(t%2)*total_L+(Lidx+L_pad)]);
-    a1 = MUL(score,smem[(t%2)*total_L+(Lidx+L_pad-1)]);
-    a2 =  sum3(score,smem[(t%2)*total_L+(Lidx+L_pad-2)],mask[Lidx]);
-final_score = max3(a,a1,a2);
+    score = scores[Nidx*T*L+t*(L)+Lidx];
+    a = MUL(score,smem[Nidx*2*total_L+(t%2)*total_L+(Lidx+L_pad)]);
+    a1 = MUL(score,smem[Nidx*2*total_L+(t%2)*total_L+(Lidx+L_pad-1)]);
+    a2 =  sum3(score,smem[Nidx*2*total_L+(t%2)*total_L+(Lidx+L_pad-2)],mask[Lidx]);
+    final_score = max3(a,a1,a2);
     int a_ = (a>a1 && a>a2)*0;
     int a1_ = (a1>a && a1>a2)*1;
     int a2_ = (a2>a && a2>a1)*2; 
-    F[(t*L+Lidx)]=final_score;
+    F[(Nidx*T*L+t*L+Lidx)]=final_score;
     
-    if(Lidx>0) BT[t*(L-1)+Lidx-1]=Lidx-(a_+a1_+a2_);
+    if(Lidx>0) BT[Nidx*T*(L-1)+t*(L-1)+Lidx-1]=Lidx-(a_+a1_+a2_);
 
-    smem[(((t+1)%2))*total_L+(Lidx+L_pad)]=final_score;
-    if(Lidx==0 || Lidx==1) smem[(((t+1)%2))*total_L+Lidx] = ZERO;
+    smem[Nidx*total_L*2+(((t+1)%2))*total_L+(Lidx+L_pad)]=final_score;
+    if(Lidx==0 || Lidx==1) smem[Nidx*2*total_L+(((t+1)%2))*total_L+Lidx] = ZERO;
     __syncthreads();
   }
 }

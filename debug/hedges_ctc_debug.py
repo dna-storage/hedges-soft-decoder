@@ -1,4 +1,5 @@
 import bonito.hedges_decode.hedges_decode as hd
+from bonito.hedges_decode.hedges_decode_utils import hedges_batch_scores
 import logging
 import time
 import argparse
@@ -31,13 +32,16 @@ if __name__ =="__main__":
     b = bytes([204,0])
     endpoint_str="GGCGACAGAAGAGTCAAGGTTC"
     #quick debug of decoding
-    for read,scores in debug_data:
+    benchmark_start_time = time.time()
+    for read,scores in hedges_batch_scores(debug_data):
         logger.info("Decoding Read: {}".format(read))
         logger.info(scores.size())
         time_start=time.time()
-        x=hd.hedges_decode(read,{"scores":scores},args.hedges_parameters,b,False,alphabet,1,endpoint_str,window=args.window_size,
+        batch=hd.hedges_decode(read,{"scores":scores},args.hedges_parameters,b,False,alphabet,1,endpoint_str,window=args.window_size,
                            trellis=args.trellis,mod_states=args.mod_states)
         time_end=time.time()
-        logger.info("Read Completed in: {} seconds".format(time_end-time_start))
-        logger.info(x['sequence'])
+        logger.info("Batch Completed in: {} seconds".format(time_end-time_start))
+        for x in batch:
+            logger.info(x['sequence'])
+    logger.info("Benchmark Completed in: {} seconds".format(time.time()-benchmark_start_time))
         

@@ -17,14 +17,16 @@ ctypedef cnp.int64_t DTYPE_t
 cdef class ContextManager:
    cdef void** _contexts
    cdef int _H
+   cdef int _N
    cdef map[char,int] letter_to_index 
    cdef map[char,char] complement
-   def __cinit__(self,int H, object global_hedge_object):
-        self._H=H
+   def __cinit__(self,int N, int H, object global_hedge_object):
+        self._H=H #number of states
+        self._N=N #batch size
         cdef void* global_hedge = PyLong_AsVoidPtr(global_hedge_object)
-        self._contexts = <void**>malloc(sizeof(void*)*self._H)
+        self._contexts = <void**>malloc(sizeof(void*)*self._H*self._N)
         cdef int i
-        for i in range(self._H):
+        for i in range(self._H*self._N):
             self._contexts[i] = hedges_hooks_c.make_context__c(global_hedge)
             
         self.letter_to_index[<char>'A']=<int>1
@@ -40,47 +42,52 @@ cdef class ContextManager:
        free(self._contexts)
    @cython.boundscheck(False)
    @cython.wraparound(False)
-   def update_context(self,ContextManager c1, cnp.ndarray[DTYPE_t,ndim=2] BT, cnp.ndarray[DTYPE_t,ndim=2] Vals,
+   def update_context(self,ContextManager c1, cnp.ndarray[DTYPE_t,ndim=3] BT, cnp.ndarray[DTYPE_t,ndim=2] Vals,
                       int update_index, int nbits):
-       #Updates this context to the other context
-       cdef void** c1_array = c1._contexts
-       cdef int h
-       cdef DTYPE_t value
-       cdef DTYPE_t prev_state
-       
-       for h in range(self._H):
-           value = Vals[h,0]
-           prev_state = BT[h,update_index]
-           hedges_hooks_c.update_context__c(self._contexts[h],c1_array[prev_state],nbits,value)
+        #Updates this context to the other context
+        cdef void** c1_array = c1._contexts
+        cdef int h
+        cdef DTYPE_t value
+        cdef DTYPE_t prev_state
+        cdef int n
+        for n in self._N:
+            for h in prange(self._H,nogil=True,num_threads=16):
+                value = Vals[h,0]
+                prev_state = BT[n,h,update_index]
+                hedges_hooks_c.update_context__c(self._contexts[n*self._H+h],c1_array[n*self._H+prev_state],nbits,value)
 
    @cython.boundscheck(False)
    @cython.wraparound(False)
-   def const_update_context(self,ContextManager c1, cnp.ndarray[DTYPE_t,ndim=2] BT, int const_value,
+   def const_update_context(self,ContextManager c1, cnp.ndarray[DTYPE_t,ndim=3] BT, int const_value,
                       int update_index, int nbits):
        #Updates this context to the other context
        cdef void** c1_array = c1._contexts
        cdef int h
        cdef DTYPE_t prev_state
-       for h in prange(self._H,nogil=True,num_threads=1):
-           prev_state = BT[h,update_index]
-           hedges_hooks_c.update_context__c(self._contexts[h],c1_array[prev_state],nbits,const_value)
+       cdef int n
+       for n in range(self._N):
+        for h in prange(self._H,nogil=True,num_threads=16):
+            prev_state = BT[n,h,update_index]
+            hedges_hooks_c.update_context__c(self._contexts[n*self._H+h],c1_array[n*self._H+prev_state],nbits,const_value)
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-def fill_base_transitions(int H, int n_edges, ContextManager c, int nbits, bool reverse):
-    cdef cnp.ndarray[DTYPE_t,ndim=2] base_transitions = np.zeros([H, n_edges], dtype=DTYPE)
+def fill_base_transitions(int N,int H, int n_edges, ContextManager c, int nbits, cnp.ndarray[cnp.uint8_t,ndim=1,cast=True]reverse):
+    cdef cnp.ndarray[DTYPE_t,ndim=3] base_transitions = np.zeros([N,H, n_edges], dtype=DTYPE)
     cdef int i
     cdef int j
+    cdef int n
     cdef void* context
     cdef char next_base
     cdef int letter_index
-    for i in prange(H,nogil=True,num_threads=1):
-        context = c._contexts[i]
-        for j in range(n_edges):
-            next_base = hedges_hooks_c.peek_context__c(context,nbits,j)
-            if reverse: next_base=c.complement[next_base]
-            letter_index = c.letter_to_index[next_base]
-            base_transitions[i,j]=letter_index
+    for n in range(N):
+        for i in prange(H,nogil=True,num_threads=16):
+            context = c._contexts[n*H+i]
+            for j in range(n_edges):
+                next_base = hedges_hooks_c.peek_context__c(context,nbits,j)
+                if reverse[n]: next_base=c.complement[next_base]
+                letter_index = c.letter_to_index[next_base]
+                base_transitions[n,i,j]=letter_index
     return base_transitions
 
 @cython.boundscheck(False)

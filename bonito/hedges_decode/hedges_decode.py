@@ -38,8 +38,7 @@ def check_hedges_params(hedges_params_dict)->None:
 
 
 
-#@profile
-def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
+def hedges_decode(read_id,scores_arg,hedges_params:str,hedges_bytes:bytes,
                   using_hedges_DNA_constraint:bool,alphabet:list,stride=1,
                   endpoint_seq:str="",window=0,trellis="base",mod_states=3)->dict:
     """
@@ -58,14 +57,11 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
 
     gc.collect()
     torch.cuda.empty_cache()
-    start_time=time.time()
-
     try:
         with torch.no_grad():
-            scores=scores["scores"].to("cpu")
+            alignment_scores=scores_arg["scores"]
             assert(hedges_params!=None and hedges_bytes!=None)
             logger.info("Scores Time Range at beginnging: {}".format(scores.size(0)))
-
             try:
                 hedges_params_dict = json.load(open(hedges_params,'r'))
                 check_hedges_params(hedges_params_dict)
@@ -85,62 +81,51 @@ def hedges_decode(read_id,scores,hedges_params:str,hedges_bytes:bytes,
             else:
                 raise ValueError("Trellis name error")
 
+            logger.info("Batch size {}".format(alignment_scores.size(0)))
             #create aligner
             aligner = AlignCTCGPU(alphabet,device="cuda:0")
-            f_endpoint_upper_index=0
-            r_endpoint_lower_index=len(scores)
-            f_endpoint_score=Log.one
-            r_endpoint_score=Log.one
+            f_endpoint_upper_index=torch.full((alignment_scores.size(0),),0,dtype=torch.long)
+            r_endpoint_lower_index=torch.full((alignment_scores.size(0),),alignment_scores.size(1),dtype=torch.long)
+            f_endpoint_score=torch.full((alignment_scores.size(0),),Log.one,dtype=torch.float32)
+            r_endpoint_score=torch.full((alignment_scores.size(0),),Log.one,dtype=torch.float32)
             if len(endpoint_seq)>0:
-                f_endpoint_lower_index,f_endpoint_upper_index,f_endpoint_score  = aligner.align(scores,endpoint_seq)
-                r_endpoint_lower_index,r_endpoint_upper_index,r_endpoint_score  = aligner.align(scores,reverse_complement(endpoint_seq))
+                f_endpoint_index,f_endpoint_score  = aligner.align(alignment_scores,endpoint_seq)
+                r_endpoint_index,r_endpoint_score  = aligner.align(alignment_scores,reverse_complement(endpoint_seq))
 
-            f_hedges_bytes_lower_index,f_hedges_bytes_upper_index,f_hedges_score = aligner.align(scores,decoder.fastforward_seq[::-1])
-            r_hedges_bytes_lower_index,r_hedges_bytes_upper_index,r_hedges_score = aligner.align(scores,complement(decoder.fastforward_seq))
+            f_hedges_index,f_hedges_score = aligner.align(alignment_scores,decoder.fastforward_seq[::-1])
+            r_hedges_index,r_hedges_score = aligner.align(alignment_scores,complement(decoder.fastforward_seq))
 
-            """
-            We need to rearrange the scores based on alignments so that index is always at the beginning of the strand.
-            Because we
-            """
-            seq=""
-            logger.info("hedges f score: {}".format(f_hedges_score))
-            logger.info("endpoint f score: {}".format(f_endpoint_score))
-            logger.info("hedges r score: {}".format(r_hedges_score))
-            logger.info("endpoint r score: {}".format(r_endpoint_score))
-            if Log.mul(f_hedges_score,f_endpoint_score)>Log.mul(r_endpoint_score,r_hedges_score):
-                logger.info("IS FORWARD")
-                if decoder.is_beam: s=scores[f_endpoint_upper_index:f_hedges_bytes_lower_index]
-                else:s=scores[f_endpoint_upper_index:f_hedges_bytes_upper_index]
-                #print(" {} {}".format(f_endpoint_upper_index,f_hedges_bytes_upper_index))
-                s=s.flip([0])
-                complement_trellis=False
-                logger.info("Score length after alignment: {}".format(s.size(0)))
-                if(s.size(0)==0 or s.size(0)<decoder._full_message_length): seq="N"
+
+            forward_scores = Log.mul(f_hedges_score,f_endpoint_score)
+            logger.info("f score: {}".format(forward_scores))
+            reverse_scores = Log.mul(r_hedges_score,r_endpoint_score)
+            logger.info("r score: {}".format(reverse_scores))
+
+
+            reverse_tensor= torch.argmax(torch.stack(forward_scores,reverse_scores)).to(torch.bool)
+            logger.info("Reverse Tensor: {}".format(reverse_tensor))
+
+            np_reverse = reverse_tensor.numpy()
+            after_alignment_scores=[]
+            for i in range(reverse_tensor.size(0)):
+                if not np_reverse[i]:
+                    after_alignment_scores.append(alignment_scores[i,f_endpoint_index[1]:f_hedges_index[1],:].flip(0))
                 else:
-                    if window>0 and window<1: decoder.window=int(window*s.size(0)/2) 
-                    seq = decoder.decode(s,complement_trellis)
-            else:
+                    after_alignment_scores.append(alignment_scores[i,r_hedges_index[0]:r_endpoint_index[0],:])
+            max_score_length = max(after_alignment_scores,lambda x: x.size(0))
+            padded_scores = (torch.nn.functional.pad(score,(0,0,0,max_score_length-score.size(1),"constant",Log.zero)) for score in after_alignment_scores)
+            viterbi_scores = torch.stack(padded_scores) #viterbi scores should hold all scores now, padded
 
-                logger.info("IS REVERSE")
-                #print("Hedges upper - lower {}".format(r_hedges_bytes_upper_index-r_hedges_bytes_lower_index))
-                if decoder.is_beam: s=scores[r_hedges_bytes_upper_index:r_endpoint_lower_index]
-                else: s=scores[r_hedges_bytes_lower_index:r_endpoint_lower_index]
-                if(s.size(0)==0 or s.size(0)<decoder._full_message_length): seq="N"
-                else:
-                    #print("heges lower upper {} {}".format(r_hedes_bytes_lower_index,r_hedges_bytes_upper_index))
-                    #print("{} {}".format(r_hedges_bytes_lower_index,r_endpoint_lower_index))
-                    complement_trellis=True
-                    decoder.fastforward_seq = complement(decoder.fastforward_seq)
-                    logger.info("Score length after alignment: {}".format(s.size(0)))
-                    if window>0 and window<1: decoder.window=int(window*s.size(0)/2)
-                    seq = decoder.decode(s,complement_trellis)
+            if window>0 and window<1: decoder.window=int(window*viterbi_scores.size(1)/2) # 1 window for all scores
+            seq_batch = decoder.decode(viterbi_scores,reverse_tensor)
+
             #try to clean up memory
-            return {'sequence':seq,'qstring':"*"*len(seq),'stride':stride,'moves':seq}
+            return [{'sequence':seq,'qstring':"*"*len(seq),'stride':stride,'moves':seq} for seq in seq_batch]
     except Exception as e:
         traceback.print_exc()
         seq="N"
         print("\n\nOffending read: {}\n\n".format(read_id),file=sys.stderr)
-        print("Scores size: {}\n".format(scores.size()),file=sys.stderr)
+        print("Scores size: {}\n".format(scores_arg.size()),file=sys.stderr)
         print(e,file=sys.stderr)
         return {'sequence':seq,'qstring':"*"*len(seq),'stride':stride,'moves':seq}
 
