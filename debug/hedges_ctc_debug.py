@@ -14,6 +14,7 @@ if __name__ =="__main__":
     parser.add_argument("--trellis",default="base",type=str,help="Trellis type")
     parser.add_argument("--window_size",default=0,type=float,help="Window Size")
     parser.add_argument("--mod_states",default=0,type=int,help="mod states to use, only does something when trellis==mod")
+    parser.add_argument("--batch",default=1,type=int,help="number of strands to batch together")
     args=parser.parse_args()
 
 
@@ -33,15 +34,18 @@ if __name__ =="__main__":
     endpoint_str="GGCGACAGAAGAGTCAAGGTTC"
     #quick debug of decoding
     benchmark_start_time = time.time()
-    for read,scores in hedges_batch_scores(debug_data):
+    counter=0
+    for read,scores in hedges_batch_scores(debug_data,args.batch):
         logger.info("Decoding Read: {}".format(read))
-        logger.info(scores.size())
+        logger.info("Batch Set Size: {}".format(scores["scores"].size()))
         time_start=time.time()
-        batch=hd.hedges_decode(read,{"scores":scores},args.hedges_parameters,b,False,alphabet,1,endpoint_str,window=args.window_size,
+        batch=hd.hedges_decode(read,scores,args.hedges_parameters,b,False,alphabet,1,endpoint_str,window=args.window_size,
                            trellis=args.trellis,mod_states=args.mod_states)
         time_end=time.time()
         logger.info("Batch Completed in: {} seconds".format(time_end-time_start))
         for x in batch:
             logger.info(x['sequence'])
+        counter+=1
+        if counter==401: exit(0)
     logger.info("Benchmark Completed in: {} seconds".format(time.time()-benchmark_start_time))
         

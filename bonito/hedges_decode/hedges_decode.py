@@ -57,11 +57,12 @@ def hedges_decode(read_id,scores_arg,hedges_params:str,hedges_bytes:bytes,
 
     gc.collect()
     torch.cuda.empty_cache()
+    torch.cuda.synchronize()
     try:
         with torch.no_grad():
             alignment_scores=scores_arg["scores"]
             assert(hedges_params!=None and hedges_bytes!=None)
-            logger.info("Scores Time Range at beginnging: {}".format(scores.size(0)))
+            logger.info("Scores Time Range at beginning: {}".format(alignment_scores.size(0)))
             try:
                 hedges_params_dict = json.load(open(hedges_params,'r'))
                 check_hedges_params(hedges_params_dict)
@@ -95,26 +96,36 @@ def hedges_decode(read_id,scores_arg,hedges_params:str,hedges_bytes:bytes,
             f_hedges_index,f_hedges_score = aligner.align(alignment_scores,decoder.fastforward_seq[::-1])
             r_hedges_index,r_hedges_score = aligner.align(alignment_scores,complement(decoder.fastforward_seq))
 
+            #logger.info("f hedges score {}".format(f_hedges_score))
+            #logger.info("f endpoint score {}".format(f_endpoint_score))
+            #logger.info("r hedges score {}".format(r_hedges_score))
+            #logger.info("r endpoint score {}".format(r_endpoint_score))
+
 
             forward_scores = Log.mul(f_hedges_score,f_endpoint_score)
-            logger.info("f score: {}".format(forward_scores))
+            #logger.info("f score: {}".format(forward_scores))
             reverse_scores = Log.mul(r_hedges_score,r_endpoint_score)
-            logger.info("r score: {}".format(reverse_scores))
+            #logger.info("r score: {}".format(reverse_scores))
 
+            #logger.info("f hedges_index {}".format(f_hedges_index))
+            #logger.info("r hedges_index {}".format(r_hedges_index))
+            #logger.info("r endpoint index {}".format(r_endpoint_index))
 
-            reverse_tensor= torch.argmax(torch.stack(forward_scores,reverse_scores)).to(torch.bool)
-            logger.info("Reverse Tensor: {}".format(reverse_tensor))
+            reverse_tensor= torch.argmax(torch.stack([forward_scores,reverse_scores]),dim=0).to(torch.bool)
+            
+            #logger.info("Reverse Tensor: {}".format(reverse_tensor))
 
             np_reverse = reverse_tensor.numpy()
             after_alignment_scores=[]
             for i in range(reverse_tensor.size(0)):
                 if not np_reverse[i]:
-                    after_alignment_scores.append(alignment_scores[i,f_endpoint_index[1]:f_hedges_index[1],:].flip(0))
+                    after_alignment_scores.append(alignment_scores[i,int(f_endpoint_index[i,1]):int(f_hedges_index[i,1]),:].flip(0))
                 else:
-                    after_alignment_scores.append(alignment_scores[i,r_hedges_index[0]:r_endpoint_index[0],:])
-            max_score_length = max(after_alignment_scores,lambda x: x.size(0))
-            padded_scores = (torch.nn.functional.pad(score,(0,0,0,max_score_length-score.size(1),"constant",Log.zero)) for score in after_alignment_scores)
-            viterbi_scores = torch.stack(padded_scores) #viterbi scores should hold all scores now, padded
+                    after_alignment_scores.append(alignment_scores[i,int(r_hedges_index[i,0]):int(r_endpoint_index[i,0]),:])
+            max_score_length = max((s.size(0) for s in after_alignment_scores))
+            padded_scores = (torch.nn.functional.pad(s,(0,0,0,max_score_length-s.size(0)),value=-1000) for s in after_alignment_scores)
+            viterbi_scores = torch.stack(list(padded_scores)) #viterbi scores should hold all scores now, padded
+            logger.info("Score tensor after align: {}".format(viterbi_scores.size()))
 
             if window>0 and window<1: decoder.window=int(window*viterbi_scores.size(1)/2) # 1 window for all scores
             seq_batch = decoder.decode(viterbi_scores,reverse_tensor)
@@ -125,8 +136,7 @@ def hedges_decode(read_id,scores_arg,hedges_params:str,hedges_bytes:bytes,
         traceback.print_exc()
         seq="N"
         print("\n\nOffending read: {}\n\n".format(read_id),file=sys.stderr)
-        print("Scores size: {}\n".format(scores_arg.size()),file=sys.stderr)
         print(e,file=sys.stderr)
-        return {'sequence':seq,'qstring':"*"*len(seq),'stride':stride,'moves':seq}
+        return [{'sequence':seq,'qstring':"*"*len(seq),'stride':stride,'moves':seq}]
 
         

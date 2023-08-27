@@ -9,14 +9,14 @@ class Align:
         self._letter_to_index = {_:i for i,_ in enumerate(self._alphabet)} #reverse map for the alphabet
         self._device=device
 
-    def get_index_range(self,BT:torch.Tensor,F:torch.Tensor)->torch.Tensor:
+    def get_index_range(self,BT:np.ndarray,F:torch.Tensor)->torch.Tensor:
         argmax_t = torch.argmax(F[:,1:,-1],dim=1) #Nx1 tensotr
-        return_matrix = np.ndarray((argmax_t.size(0),2),dtype=np.int) #Nx2 tensor
+        return_matrix = np.ndarray((argmax_t.size(0),2),dtype=np.int32) #Nx2 tensor
         for i in range(argmax_t.size(0)):
-            current_strand_index = BT.size(2)-1
+            current_strand_index = BT.shape[2]-1
             current_time_index = int(argmax_t[i])
-            while current_strand_index!=-1:
-                current_strand_index = int(BT[current_time_index,current_strand_index])-1
+            while current_strand_index>=0:
+                current_strand_index = int(BT[i,current_time_index,current_strand_index])-1
                 current_time_index-=1
             return_matrix[i,0]=int(current_time_index+1)
             return_matrix[i,1]=int(argmax_t[i])
@@ -29,8 +29,8 @@ class AlignCTC(Align):
     def __init__(self,alphabet:list,device="cpu") -> None:
         super().__init__(alphabet,device)
     def align(self, scores: torch.Tensor, seq: str) -> tuple[torch.Tensor, torch.Tensor]:
-        N,T,B=scores.size
-        target_indexes = HedgesBonitoCTC.string_to_indexes(seq,self._letter_to_index,device=self._device,N)
+        N,T,B=scores.size()
+        target_indexes = HedgesBonitoCTC.string_to_indexes(seq,self._letter_to_index,device=self._device,batch=N)
         target_indexes = HedgesBonitoCTC.insert_blanks(target_indexes)
         BT = scores.new_full((N,T,target_indexes.size(0)),0,dtype=torch.int64) #backtrace to know where alignment ranges over T
         F = scores.new_full((N,T,target_indexes.size(0)+1),Log.zero) #forward calculating Trellis
@@ -50,7 +50,7 @@ class AlignCTC(Align):
             F[:,t,:],arg_max = Max.sum(torch.stack([stay,previous,previous_previous]))
             running_alpha[:,2:]=F[:,t,:]
             BT[:,t,:]=r-arg_max[1:]
-        lower,upper = self.get_index_range(BT.to("cpu"),F.to("cpu"))
+        lower,upper = self.get_index_range(BT.to("cpu").numpy(),F.to("cpu"))
         return lower,upper,torch.max(F[:,1:,-1],dim=1)
 
 class AlignCTCGPU(Align):
@@ -58,24 +58,39 @@ class AlignCTCGPU(Align):
 
     def __init__(self, alphabet: list, device="cuda:0") -> None:
         super().__init__(alphabet, device)
+    
+    def get_index_range(self,BT:np.ndarray,F:torch.Tensor)->torch.Tensor:
+        argmax_t = torch.argmax(F[:,1:,-1],dim=1) #Nx1 tensotr
+        return_matrix = np.ndarray((argmax_t.size(0),2),dtype=np.int32) #Nx2 tensor
+        for i in range(argmax_t.size(0)):
+            current_strand_index = BT.shape[2]-1
+            current_time_index = int(argmax_t[i])
+            while current_strand_index>=0:
+                current_strand_index = int(BT[i,current_time_index,current_strand_index])
+                current_time_index-=1
+            return_matrix[i,0]=int(current_time_index+1)
+            return_matrix[i,1]=int(argmax_t[i])
+        return torch.from_numpy(return_matrix)
+    
     def align(self, scores: torch.Tensor, seq: str) -> tuple[torch.Tensor,torch.Tensor]:
-        N,T,B=scores.size(0)
+        N,T,B=scores.size()
         scores_gpu=scores.to(self._device)
-        target_indexes = HedgesBonitoCTC.string_to_indexes(seq,self._letter_to_index,device=self._device,N)
+        target_indexes = HedgesBonitoCTC.string_to_indexes(seq,self._letter_to_index,device=self._device,batch=N)
         target_indexes = HedgesBonitoCTC.insert_blanks(target_indexes)
-        BT = torch.full((N,T,target_indexes.size(0)),0,dtype=torch.int64,device=self._device) #backtrace to know where alignment ranges over T
-        F = torch.full((N,T,target_indexes.size(0)+1),Log.zero,device=self._device) #forward calculating Trellis
-        mask = target_indexes[:,:-2]==target_indexes[0,2:]
-        mask=torch.nn.functional.pad(mask,(3,0),value=1)
-        mask = torch.where(mask,torch.full((N,emission_scores.size(1)),Log.zero,device=self._device),
-                           torch.full((N,emission_scores.size(1)),Log.one,device=self._device))
+        BT = torch.full((N,T,target_indexes.size(1)),0,dtype=torch.int64,device=self._device) #backtrace to know where alignment ranges over T
+        F = torch.full((N,T,target_indexes.size(1)),Log.zero,device=self._device) #forward calculating Trellis
+        mask = target_indexes[:,:-2]==target_indexes[:,2:]
+        mask=torch.nn.functional.pad(mask,(2,0),value=1)
+        mask = torch.where(mask,torch.full((N,target_indexes.size(1)),Log.zero,device=self._device),
+                           torch.full((N,target_indexes.size(1)),Log.one,device=self._device))
         with cp.cuda.Device(0):
-            L = target_indexes.size(2)
-            target_threads = 512
-            batch_per_block=(target_threads//L)+N%-(target_threads//L)
+            L = target_indexes.size(1)
+            target_threads = L
+            #batch_per_block=(target_threads//L)+N%-(target_threads//L)
+            batch_per_block=1
             batch_blocks = N//batch_per_block
-            AlignCTCGPU.fwd_alg_kernel(grid=(batch_blocks,1,1),block=(L,batch_per_block,1),shared_mem = (2*4*(L+2))*batch_per_block,args=(scores_gpu.data_ptr(),target_indexes.data_ptr(),F.data_ptr(),BT.data_ptr(),mask.data_ptr(),
-                                                                                               T,L,2,N))
-        lower_upper_tensor = self.get_index_range(BT.to("cpu"),F.to("cpu"))
-        return lower_upper_tensor,torch.max(F[:,1:,-1],dim=1).to("cpu")
+            AlignCTCGPU.fwd_alg_kernel(grid=(batch_blocks,1,1),block=(L,batch_per_block,1),shared_mem = (2*4*(L+2))*batch_per_block,args=(scores_gpu.data_ptr(),target_indexes.data_ptr(),F.data_ptr(),BT.data_ptr(),mask.data_ptr(),T,L,2,N))
+        lower_upper_tensor = self.get_index_range(BT.to("cpu").numpy(),F.to("cpu"))
+        max_score,arg_max = torch.max(F[:,:,-1],dim=1)
+        return lower_upper_tensor,max_score.to("cpu")
         

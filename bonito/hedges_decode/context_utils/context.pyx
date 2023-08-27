@@ -50,7 +50,7 @@ cdef class ContextManager:
         cdef DTYPE_t value
         cdef DTYPE_t prev_state
         cdef int n
-        for n in self._N:
+        for n in range(self._N):
             for h in prange(self._H,nogil=True,num_threads=16):
                 value = Vals[h,0]
                 prev_state = BT[n,h,update_index]

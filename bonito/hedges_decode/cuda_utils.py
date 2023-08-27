@@ -1,3 +1,6 @@
+"""
+Code adapted from https://github.com/davidcpage/seqdist
+"""
 import cupy as cp
 from pathlib import Path
 import numpy as np

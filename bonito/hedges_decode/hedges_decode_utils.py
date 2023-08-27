@@ -23,12 +23,21 @@ def hedges_batch_scores(scores,batchsize=1): #batch scores together so hedges de
     reads=[]
     scores_set=[]
     batch_counter=0
+    scores = list(scores)
+    #scores = sorted(scores,key = lambda x:x[1].size(0))
     for read,score in scores:
+        batch_counter+=1
         reads.append(read)
-        scores_set.append(score["scores"])
-        if batch_counter%batchsize==0:
-            max_score_length = max(scores_set,lambda x:x.size(0))
-            scores_set = (torch.nn.functional.pad(score,(0,0,0,max_score_length-score.size(0),"constant")) for score in scores_set)
-            yield (reads,{'scores':torch.stack(scores_set)})
+        if isinstance(score,dict): scores_set.append(score["scores"])
+        else:
+            scores_set.append(score)
+        if batch_counter%batchsize==0 and batch_counter>0:
+            max_score_length = max((s.size(0) for s in scores_set))
+            print(max_score_length)
+            scores_set = (torch.nn.functional.pad(score,(0,0,0,max_score_length-score.size(0)),value=Log.zero) for score in scores_set)
+            yield (reads,{'scores':torch.stack(list(scores_set))})
             scores_set=[]
             reads=[]
+            batch_counter=0
+       
+    

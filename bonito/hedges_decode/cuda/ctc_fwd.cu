@@ -1,3 +1,7 @@
+/*
+Code inspired from https://github.com/davidcpage/seqdist/blob/master/seqdist/cuda/sparse_logZ.cu
+*/
+
 __device__ __forceinline__ FLOAT max3(FLOAT a, FLOAT a1, FLOAT a2) {
     FLOAT maxa = a > a1 ? a : a1; 
     return maxa > a2 ? maxa : a2;
@@ -24,7 +28,7 @@ __device__ __forceinline__ FLOAT logdiffexp2(FLOAT a, FLOAT a1) {
 
 
 
-__device__ __forceinline__ FLOAT sum3(FLOAT a, FLOAT a1, FLOAT a2) {return a + a1 + a2;}
+__device__ __forceinline__ FLOAT add3(FLOAT a, FLOAT a1, FLOAT a2) {return a + a1 + a2;}
 __device__ __forceinline__ FLOAT add(FLOAT a, FLOAT b) {return a + b;}
 __device__ __forceinline__ FLOAT mul(FLOAT a, FLOAT b) {return a * b;}
 
@@ -116,7 +120,7 @@ extern "C" __global__ void fwd_logspace_reduce(
 					    FLOAT* __restrict__ alpha_t,
 					    const FLOAT* __restrict__ mask,
 					    const FLOAT* __restrict__ F,
-              FLOAT* __restrict__ out_scores,
+              				    FLOAT* __restrict__ out_scores,
 					    int lower_t_range,
 					    int upper_t_range,
 					    int H,
@@ -126,7 +130,7 @@ extern "C" __global__ void fwd_logspace_reduce(
 					    int target_score_pad,
 					    int F_offset,
 					    int F_T,
-              int T,
+              				    int T,
 					    int abs_lower_t_range_offset
 					)
 
@@ -147,14 +151,14 @@ extern "C" __global__ void fwd_logspace_reduce(
   if(Hidx>=H) return; //get rid of dead threads
   //smem needs to be initialized to time -1 so forward algorithm can go ahead
   if(Lidx==0) smem[(lower_t_range%2)*HEL_stride+ blockHidx*EL_stride + Eidx*(total_L) + Lidx] = ZERO;
-  if(Lidx==1) smem[(lower_t_range%2)*HEL_stride+ blockHidx*EL_stride + Eidx*(total_L) + Lidx] = F[(lower_t_range+F_offset)*H+Hidx];
+  if(Lidx==1) smem[(lower_t_range%2)*HEL_stride+ blockHidx*EL_stride + Eidx*(total_L) + Lidx] = F[Nidx*H*F_T+(lower_t_range+F_offset)*H+Hidx];
   smem[(lower_t_range%2)*HEL_stride+blockHidx*EL_stride+Eidx*(total_L)+(Lidx+L_pad)] = ZERO; 
   __syncthreads();
    int fetch_ptr = 0;//index to keep track of what prefetch we use/need to update	
   if(Lidx==1){ //try some asynchroniouse mem copies
        for(int i=0; i<PREFETCH; i++) pfL1(&F[Nidx*F_T*H+(lower_t_range+F_offset+1+i)*H+Hidx]);
-  }  
-  float mask_value = mask[Nidx*E*L+Hidx*E*L+Eidx*L+Lidx];
+  }   
+  float mask_value = mask[Nidx*H*E*L+Hidx*E*L+Eidx*L+Lidx];
   int smem_select = lower_t_range%2;
   for(int t=lower_t_range; t<upper_t_range;t++){
     FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back    
@@ -178,8 +182,9 @@ extern "C" __global__ void fwd_logspace_reduce(
     __syncthreads();
     //moved write to after sync 
     if (Lidx==L-1){
-      alpha_t[Nidx*H*(upper_t_range-lower_t_range)*E+t*H*E+ Hidx*E+ Eidx] = final_score;
+      alpha_t[Nidx*H*T*E+t*H*E+ Hidx*E+ Eidx] = final_score; //TODO: this needs to be fixed for window sizes
     }
+
     //reduce final score 
     reduction_value = SUM2(reduction_value,MUL(final_score,log(1-exp(next_t_score))));
     smem_select=next_smem;
@@ -202,31 +207,37 @@ extern "C" __global__ void fwd_logspace_align(
 {
   int Lidx = threadIdx.x;
   int Nidx = threadIdx.y+blockDim.y*blockIdx.x;
+  int Nidx_t = threadIdx.y;
   if(Nidx>=N) return;
   int64_t target = targets[Nidx*L+Lidx];
   int total_L = L+L_pad;
   extern __shared__ FLOAT smem[];
-  if(Lidx==0 || Lidx==1) smem[Nidx*2*total_L+Lidx] = ZERO;
-  if(Lidx==0) smem[Nidx*2*total_L+Lidx+L_pad]=ONE;
-  else smem[Nidx*2*total_L+Lidx+L_pad] = ZERO;
+  FLOAT mask_value = mask[Nidx*L+Lidx];
+  if(Lidx==0){
+    smem[Nidx_t*2*total_L+Lidx] = ONE; //set this position to constant ONE, immitates behavior of "start" symbol
+    smem[Nidx_t*2*total_L+total_L+Lidx]=ONE;
+    mask_value = ONE; //first position needs to be able to use 2-back "start" symbol
+  }
+  else if(Lidx==1){
+    smem[Nidx_t*2*total_L+Lidx] = ZERO; 
+    smem[Nidx_t*2*total_L+total_L+Lidx]=ZERO;
+  } 
+  smem[Nidx_t*2*total_L+Lidx+L_pad] = ZERO;
   __syncthreads();
   for(int t=0;t<T;t++){
     //perform core calculations for forward algorithm
     FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back
-    score = scores[Nidx*T*L+t*(L)+Lidx];
-    a = MUL(score,smem[Nidx*2*total_L+(t%2)*total_L+(Lidx+L_pad)]);
-    a1 = MUL(score,smem[Nidx*2*total_L+(t%2)*total_L+(Lidx+L_pad-1)]);
-    a2 =  sum3(score,smem[Nidx*2*total_L+(t%2)*total_L+(Lidx+L_pad-2)],mask[Lidx]);
+    score = scores[Nidx*T*NBASE+t*NBASE+target];
+    a = MUL(score,smem[Nidx_t*2*total_L+(t%2)*total_L+(Lidx+L_pad)]);
+    a1 = MUL(score,smem[Nidx_t*2*total_L+(t%2)*total_L+(Lidx+L_pad-1)]);
+    a2 =  add3(score,smem[Nidx_t*2*total_L+(t%2)*total_L+(Lidx+L_pad-2)],mask_value);
     final_score = max3(a,a1,a2);
     int a_ = (a>a1 && a>a2)*0;
     int a1_ = (a1>a && a1>a2)*1;
     int a2_ = (a2>a && a2>a1)*2; 
     F[(Nidx*T*L+t*L+Lidx)]=final_score;
-    
-    if(Lidx>0) BT[Nidx*T*(L-1)+t*(L-1)+Lidx-1]=Lidx-(a_+a1_+a2_);
-
-    smem[Nidx*total_L*2+(((t+1)%2))*total_L+(Lidx+L_pad)]=final_score;
-    if(Lidx==0 || Lidx==1) smem[Nidx*2*total_L+(((t+1)%2))*total_L+Lidx] = ZERO;
+    BT[Nidx*T*(L)+t*(L)+Lidx]=Lidx-(a_+a1_+a2_);
+    smem[Nidx_t*total_L*2+(((t+1)%2))*total_L+(Lidx+L_pad)]=final_score;
     __syncthreads();
   }
 }

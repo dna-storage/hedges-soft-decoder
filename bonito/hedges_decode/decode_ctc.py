@@ -57,7 +57,7 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
     @classmethod
     def insert_blanks(cls,seq:torch.Tensor)->torch.Tensor:
         #blanks should be index 0 in the alphabet
-        N,L = seq.size
+        N,L = seq.size()
         ret_tensor = seq.new_zeros((N,L*2+1,),dtype=torch.int64)
         ret_tensor[:,1::2]=seq
         return ret_tensor 
@@ -84,7 +84,7 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
         strand_indexes = torch.where(reverse[:,None].expand(-1,len(self._fastforward_seq)),reverse_strand_indexes,forward_strand_indexes)
         padded_strand = HedgesBonitoCTC.insert_blanks(strand_indexes)[:,:-1] #leave off last blank due to viterbi branch path nature
         strand_index_matrix = padded_strand[:,None,:].expand(-1,T_range,-1).to(scores.get_device())#TxL matrix
-        scores_matrix = scores[:,lower_t_range:upper_t_range,:].gather(1,strand_index_matrix) #get log probabilities for each base at each time point
+        scores_matrix = scores[:,lower_t_range:upper_t_range,:].gather(2,strand_index_matrix) #get log probabilities for each base at each time point
         N,_,L = scores_matrix.size()
         running_alpha = scores.new_full((N,L+2,),Log.zero) #1 dimensional tensor that tracks alpha for all characters at time t
         #need a mask matrix for repeats
@@ -95,9 +95,9 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
         for t in torch.arange(T_range):
             running_alpha[:,2:] = Log.mul(scores_matrix[:,t,:],Log.sum(torch.stack([running_alpha[:,2:],running_alpha[:,1:-1],torch.where(mask,log_zeros,running_alpha[:,0:-2])]),dim=0))
             F[:,t,self._initial_state_index] = running_alpha[:,-1]
+        #print(torch.max(F[:,:,self._initial_state_index],dim=1))
+        #exit(0)
         return F
-
-       #@profile        
 
     def forward_step(self, scores: torch.Tensor, base_transitions: torch.Tensor, F: torch.Tensor, initial_bases:torch.Tensor, strand_index:int,
                      nbits:int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -119,15 +119,15 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
             upper_t_range=int(min(scores_per_base+self._window,T-self._full_message_length+strand_index+1))
             T_range = upper_t_range-lower_t_range
             #need to create a NxHx2^nbitsxL tensor to represent all strings we are calculating alphas for var in collection:
-            targets = torch.concat([initial_bases[:,:,:,None],base_transitions],dim=2)
+            targets = torch.concat([initial_bases[:,:,:,None],base_transitions],dim=3)
             N,_,_2,L = targets.size()
         else: #base, no window case
             lower_t_range=strand_index+1-L_trans//2
             upper_t_range=T-self._full_message_length+strand_index+1
             #need to create a Hx2^nbitsxL tensor to represent all strings we are calculating alphas for var in collection:
-            targets = torch.concat([initial_bases[:,:,:,None],base_transitions],dim=2)
+            targets = torch.concat([initial_bases[:,:,:,None],base_transitions],dim=3)
             N,_,_2,L = targets.size()
-        mask = torch.nn.functional.pad(targets[:,:,2:]==targets[:,:,:-2],(1,0),value=1)
+        mask = torch.nn.functional.pad(targets[:,:,:,2:]==targets[:,:,:,:-2],(1,0),value=1)
         #calculate valid ranges of t to avoid unnecessary iterations
         alpha_t,out_scores = self._fwd_algorithm(targets,scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,lower_t_range-self._current_F_lower)
         self._current_F_lower=lower_t_range #keeps track of most recent lower_t_range
@@ -153,7 +153,7 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
         #convert mask from bools to floats to avoid control flow in GPU kernel
         mask = torch.where(mask,torch.full(mask.size(),Log.zero,device=device),torch.full(mask.size(),Log.one,device=device))
         w=F.to(device)
-        out_scores = targets.new_zeros((H,E),dtype=torch.float)
+        out_scores = targets.new_zeros((N,H,E),dtype=torch.float)
         if not using_window:
             r_1 = lower_t_range
             r_2 = upper_t_range
@@ -174,10 +174,15 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             max_T_per_block=128 #max threads to have per block
             h_per_block = max_T_per_block//(L*E)
             H_blocks = (H//h_per_block)+1
-            #print(H_blocks)
             HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,N,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,args=(targets.data_ptr(),scores.data_ptr(),y.data_ptr(),
-                                                                                                                                   mask.data_ptr(),w.data_ptr(),out_scores.data_ptr(),r_1,r_2,
+                                                                                                                                   mask.data_ptr(),w.data_ptr(),
+                                                                                                                                   out_scores.data_ptr(),r_1,r_2,
                                                                                                                                    H,E,L,2,1,f_offset,F.size(1),scores.size(1),lower_t_range_offset))
+        #print(lower_t_range)
+        #print("F {}".format(F[0,-100,:]))
+        #print("Y {}".format(y[0,-100,:,:]))
+        #print("O {}",format(out_scores[0,:]))
+        #if(lower_t_range==1720): exit(0)
         return y,out_scores
         
     
