@@ -2,6 +2,9 @@ from .plot import *
 import bonito.hedges_decode.cuda_utils as cu
 from .hedges_decode_utils import *
 import numpy as np
+import logging
+import time
+
 
 import torch
 import dnastorage.codec.hedges_hooks as hedges_hooks
@@ -64,7 +67,6 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
     
     def init_initial_state_F(self, scores:torch.Tensor,reverse:torch.Tensor) -> torch.Tensor:
         N,T,I = scores.size()
-
         if self._window>0:
             scores_per_base = T/self._full_message_length
             strand_index = len(self._fastforward_seq)-1
@@ -95,12 +97,10 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
         for t in torch.arange(T_range):
             running_alpha[:,2:] = Log.mul(scores_matrix[:,t,:],Log.sum(torch.stack([running_alpha[:,2:],running_alpha[:,1:-1],torch.where(mask,log_zeros,running_alpha[:,0:-2])]),dim=0))
             F[:,t,self._initial_state_index] = running_alpha[:,-1]
-        #print(torch.max(F[:,:,self._initial_state_index],dim=1))
-        #exit(0)
         return F
 
     def forward_step(self, scores: torch.Tensor, base_transitions: torch.Tensor, F: torch.Tensor, initial_bases:torch.Tensor, strand_index:int,
-                     nbits:int) -> tuple[torch.Tensor, torch.Tensor]:
+                     nbits:int,alpha_t:torch.Tensor,time_range_end:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         @brief      Calculates a forward step in the hedges ctc algorithm
         @param      scores Txlen(alphabet) tensor of state scores
@@ -129,9 +129,9 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
             N,_,_2,L = targets.size()
         mask = torch.nn.functional.pad(targets[:,:,:,2:]==targets[:,:,:,:-2],(1,0),value=1)
         #calculate valid ranges of t to avoid unnecessary iterations
-        alpha_t,out_scores = self._fwd_algorithm(targets,scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,lower_t_range-self._current_F_lower)
+        out_scores = self._fwd_algorithm(targets,scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,lower_t_range-self._current_F_lower,alpha_t,time_range_end)
         self._current_F_lower=lower_t_range #keeps track of most recent lower_t_range
-        return out_scores,alpha_t
+        return out_scores
 
     
 
@@ -147,7 +147,7 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
     @classmethod
     def _fwd_algorithm(cls, targets: torch.Tensor,scores: torch.Tensor, mask: torch.Tensor,
                        F: torch.Tensor, lower_t_range: int, upper_t_range: int,device,
-                       using_window,pad)->torch.Tensor:
+                       using_window,pad,alpha_t:torch.Tensor,time_range_end:torch.Tensor)->torch.Tensor:
         N,H,E,L=targets.size()
         L-=1
         #convert mask from bools to floats to avoid control flow in GPU kernel
@@ -159,13 +159,11 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             r_2 = upper_t_range
             f_offset=int(-1)
             lower_t_range_offset=0
-            y = torch.full((N,scores.size(1),H,E),Log.zero,device=device) #output pointer
         else:
             r_1 = 0
             r_2 = upper_t_range-lower_t_range
             f_offset=pad-1
             lower_t_range_offset=lower_t_range
-            y = torch.full((N,upper_t_range-lower_t_range,H,E),Log.zero,device=device) #output pointer
         with cp.cuda.Device(0):
             #Need to break down L,H,E into block sizes <=1024
             #L can't be moved because of thread sync. dependency
@@ -174,16 +172,11 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             max_T_per_block=128 #max threads to have per block
             h_per_block = max_T_per_block//(L*E)
             H_blocks = (H//h_per_block)+1
-            HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,N,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,args=(targets.data_ptr(),scores.data_ptr(),y.data_ptr(),
+            HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,N,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,args=(targets.data_ptr(),scores.data_ptr(),alpha_t.data_ptr(),
                                                                                                                                    mask.data_ptr(),w.data_ptr(),
                                                                                                                                    out_scores.data_ptr(),r_1,r_2,
-                                                                                                                                   H,E,L,2,1,f_offset,F.size(1),scores.size(1),lower_t_range_offset))
-        #print(lower_t_range)
-        #print("F {}".format(F[0,-100,:]))
-        #print("Y {}".format(y[0,-100,:,:]))
-        #print("O {}",format(out_scores[0,:]))
-        #if(lower_t_range==1720): exit(0)
-        return y,out_scores
+                                                                                                                                   H,E,L,2,1,f_offset,F.size(1),scores.size(1),lower_t_range_offset,time_range_end.data_ptr()))
+        return out_scores
         
     
 

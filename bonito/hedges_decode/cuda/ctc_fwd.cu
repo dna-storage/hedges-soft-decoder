@@ -2,6 +2,9 @@
 Code inspired from https://github.com/davidcpage/seqdist/blob/master/seqdist/cuda/sparse_logZ.cu
 */
 
+#define LOG(x) log(x)
+#define EXP(x) exp(x)
+
 __device__ __forceinline__ FLOAT max3(FLOAT a, FLOAT a1, FLOAT a2) {
     FLOAT maxa = a > a1 ? a : a1; 
     return maxa > a2 ? maxa : a2;
@@ -13,17 +16,17 @@ __device__ __forceinline__ FLOAT max2(FLOAT a, FLOAT a1) {
 
 __device__ __forceinline__ FLOAT logsumexp3(FLOAT a, FLOAT a1, FLOAT a2) {
     FLOAT maxa = max3(a, a1, a2); 
-    return maxa + log(exp(a-maxa) + exp(a1-maxa) + exp(a2-maxa));
+    return maxa + LOG(EXP(a-maxa) + EXP(a1-maxa) + EXP(a2-maxa));
 }
 
 __device__ __forceinline__ FLOAT logsumexp2(FLOAT a, FLOAT a1) {
   FLOAT maxa = max2(a, a1); 
-  return maxa + log(exp(a-maxa) + exp(a1-maxa));
+  return maxa + LOG(EXP(a-maxa) + EXP(a1-maxa));
 }
 
 __device__ __forceinline__ FLOAT logdiffexp2(FLOAT a, FLOAT a1) {
   FLOAT maxa = max2(a, a1);
-  return maxa + log(exp(a-maxa) - exp(a1-maxa));
+  return maxa + LOG(exp(a-maxa) - EXP(a1-maxa));
 }
 
 
@@ -131,7 +134,8 @@ extern "C" __global__ void fwd_logspace_reduce(
 					    int F_offset,
 					    int F_T,
               				    int T,
-					    int abs_lower_t_range_offset
+					    int abs_lower_t_range_offset,
+					    const int64_t* __restrict__ time_range_end
 					)
 
 
@@ -143,6 +147,7 @@ extern "C" __global__ void fwd_logspace_reduce(
   const int HEL_stride = blockDim.y*E*total_L;
   const int EL_stride = E*total_L;
   const int blockH_EL = blockHidx*EL_stride;
+  const int abs_time_endpoint = time_range_end[Nidx];
   FLOAT reduction_value=ZERO;
   FLOAT next_t_score=ZERO;
 
@@ -161,6 +166,7 @@ extern "C" __global__ void fwd_logspace_reduce(
   float mask_value = mask[Nidx*H*E*L+Hidx*E*L+Eidx*L+Lidx];
   int smem_select = lower_t_range%2;
   for(int t=lower_t_range; t<upper_t_range;t++){
+    if((abs_lower_t_range_offset+t)>=abs_time_endpoint) break; //if a strand reaches it's practical enpoit, just exit and don't waste compute
     FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back    
     score = scores[Nidx*T*NBASE+(abs_lower_t_range_offset+t)*NBASE+target];  	
     if(t<upper_t_range-1) next_t_score=scores[Nidx*T*NBASE+(abs_lower_t_range_offset+t+1)*NBASE+target];
@@ -186,7 +192,7 @@ extern "C" __global__ void fwd_logspace_reduce(
     }
 
     //reduce final score 
-    reduction_value = SUM2(reduction_value,MUL(final_score,log(1-exp(next_t_score))));
+    reduction_value = SUM2(reduction_value,MUL(final_score,LOG(1-EXP(next_t_score))));
     smem_select=next_smem;
   }
   if(Lidx==L-1) out_scores[Nidx*H*E+Hidx*E+Eidx]=reduction_value;

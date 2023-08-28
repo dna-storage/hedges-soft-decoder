@@ -96,20 +96,11 @@ def hedges_decode(read_id,scores_arg,hedges_params:str,hedges_bytes:bytes,
             f_hedges_index,f_hedges_score = aligner.align(alignment_scores,decoder.fastforward_seq[::-1])
             r_hedges_index,r_hedges_score = aligner.align(alignment_scores,complement(decoder.fastforward_seq))
 
-            #logger.info("f hedges score {}".format(f_hedges_score))
-            #logger.info("f endpoint score {}".format(f_endpoint_score))
-            #logger.info("r hedges score {}".format(r_hedges_score))
-            #logger.info("r endpoint score {}".format(r_endpoint_score))
-
 
             forward_scores = Log.mul(f_hedges_score,f_endpoint_score)
             #logger.info("f score: {}".format(forward_scores))
             reverse_scores = Log.mul(r_hedges_score,r_endpoint_score)
             #logger.info("r score: {}".format(reverse_scores))
-
-            #logger.info("f hedges_index {}".format(f_hedges_index))
-            #logger.info("r hedges_index {}".format(r_hedges_index))
-            #logger.info("r endpoint index {}".format(r_endpoint_index))
 
             reverse_tensor= torch.argmax(torch.stack([forward_scores,reverse_scores]),dim=0).to(torch.bool)
             
@@ -117,18 +108,27 @@ def hedges_decode(read_id,scores_arg,hedges_params:str,hedges_bytes:bytes,
 
             np_reverse = reverse_tensor.numpy()
             after_alignment_scores=[]
+            time_range_end = []
             for i in range(reverse_tensor.size(0)):
                 if not np_reverse[i]:
                     after_alignment_scores.append(alignment_scores[i,int(f_endpoint_index[i,1]):int(f_hedges_index[i,1]),:].flip(0))
+                    time_range_end.append(after_alignment_scores[-1].size(0))
                 else:
                     after_alignment_scores.append(alignment_scores[i,int(r_hedges_index[i,0]):int(r_endpoint_index[i,0]),:])
+                    time_range_end.append(after_alignment_scores[-1].size(0))
             max_score_length = max((s.size(0) for s in after_alignment_scores))
             padded_scores = (torch.nn.functional.pad(s,(0,0,0,max_score_length-s.size(0)),value=-1000) for s in after_alignment_scores)
             viterbi_scores = torch.stack(list(padded_scores)) #viterbi scores should hold all scores now, padded
+            time_range_end = torch.tensor(time_range_end,dtype=torch.int64)
             logger.info("Score tensor after align: {}".format(viterbi_scores.size()))
-
+            del aligner
+            del after_alignment_scores
+            gc.collect()
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            print(torch.cuda.mem_get_info())
             if window>0 and window<1: decoder.window=int(window*viterbi_scores.size(1)/2) # 1 window for all scores
-            seq_batch = decoder.decode(viterbi_scores,reverse_tensor)
+            seq_batch = decoder.decode(viterbi_scores,reverse_tensor,time_range_end)
 
             #try to clean up memory
             return [{'sequence':seq,'qstring':"*"*len(seq),'stride':stride,'moves':seq} for seq in seq_batch]

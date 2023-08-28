@@ -4,6 +4,7 @@ import numpy as np
 import dnastorage.codec.hedges as hedges
 import dnastorage.codec.hedges_hooks as hedges_hooks
 import math 
+import gc
 from bonito.hedges_decode.context_utils import ContextManager
 import bonito.hedges_decode.context_utils as context_utils
 from .decode_ctc import *
@@ -143,9 +144,11 @@ class HedgesBonitoBase:
 
     #helps transfer F scores more efficiently than re-arangement
     def get_new_F(self,temp_f_outgoing:torch.Tensor,trellis_incoming_indexes:torch.Tensor,
-                  trellis_incoming_value:torch.Tensor,value_of_max_scores:torch.Tensor)->torch.Tensor:
+                  trellis_incoming_value:torch.Tensor,value_of_max_scores:torch.Tensor,Fmem=None)->torch.Tensor:
         assert torch.cuda.is_available() #make sure we have cuda for this class
-        return_F = torch.full((temp_f_outgoing.size(0),temp_f_outgoing.size(1),temp_f_outgoing.size(2)),0,device=self._device,dtype=torch.float)
+        if Fmem is None:
+            return_F = torch.full((temp_f_outgoing.size(0),temp_f_outgoing.size(1),temp_f_outgoing.size(2)),0,device=self._device,dtype=torch.float)
+        else: return_F=Fmem
         with cp.cuda.Device(0):  
             #just paralellize over H for now, could parallelize time block transfers if wanted
             N,T,H = return_F.size()
@@ -173,7 +176,7 @@ class HedgesBonitoBase:
         return return_F
 
     #@profile
-    def decode(self,scores:torch.Tensor,reverse:torch.Tensor)->str:
+    def decode(self,scores:torch.Tensor,reverse:torch.Tensor,time_range_end:torch.Tensor)->str:
         """
         @brief      Core algorithm for implementing hedges viterbi decoding
 
@@ -194,6 +197,8 @@ class HedgesBonitoBase:
 
         #setup forward arrays
         F=self._scorer.init_initial_state_F(scores_gpu,reverse) #initialize the state corresponding to the initial valid state of the trellis
+        temp_f_outgoing = torch.full((N,F.size(1),self._H,2**self._max_bits),Log.zero,device=self._device)
+        
         
         current_scores = torch.full((N,self._H),Log.zero)
         """
@@ -211,7 +216,6 @@ class HedgesBonitoBase:
         accumulate_base_transition=torch.full((N,self._H,2**1,3*2),0,dtype=torch.int64)
         state_is_dead = torch.zeros((N,self._H),dtype=torch.uint8)
         for i in range(self._full_message_length-self._L,self._full_message_length):
-            #print(i)
             nbits = hedges_hooks.get_nbits(self._global_hedge_state_init,i)
             base_transition_outgoing=self.fill_base_transitions(N,self._H,2**nbits,current_C,nbits,reverse.numpy())
             pattern_range=pattern_counter*2
@@ -231,10 +235,11 @@ class HedgesBonitoBase:
                 else:
                     starting_bases = torch.from_numpy(BT_bases[:,:,i-sub_length-1-(pattern_counter-1)])[:,:,None].expand(-1,-1,2**nbits)
 
-                state_transition_scores_outgoing, temp_f_outgoing = self._scorer.forward_step(scores_gpu,
+                state_transition_scores_outgoing = self._scorer.forward_step(scores_gpu,
                                                                                       accumulate_base_transition[:,:,:2**nbits,:pattern_range+2].to(self._device),
-                                                                                      F,starting_bases.to(self._device),i,nbits)
+                                                                                      F,starting_bases.to(self._device),i,nbits,temp_f_outgoing,time_range_end.to(self._device))
                 
+
                 pattern_counter=0 #reset pattern counter
                 #get incoming bases and scores coming in to each state so that the best one can be selected
                 bases = base_transition_outgoing[:,trellis_incoming_indexes,trellis_incoming_value]#NxHx2^n matrix of bases to add
@@ -253,10 +258,8 @@ class HedgesBonitoBase:
                 #update back trace matrices
                 BT_index[:,:,i-sub_length] = trellis_incoming_indexes[H_range,cpu_argmax_scores] #set the back trace index with best incoming state
                 BT_bases[:,:,i-sub_length] = bases[N_range,H_range,cpu_argmax_scores] #set base back trace matrix
-                print(i)
-                print(bases)
                 #copy over F values
-                F = self.get_new_F(temp_f_outgoing,self._device_trellis_connections[nbits],self._device_trellis_transition_values[nbits],argmax_scores) 
+                F = self.get_new_F(temp_f_outgoing,self._device_trellis_connections[nbits],self._device_trellis_transition_values[nbits],argmax_scores,Fmem=F) 
                 trellis_numpy=trellis_incoming_value.numpy()
                 other_C.update_context(current_C,BT_index,trellis_numpy,i-sub_length,nbits)
             #swap contexts to make sure update happens properly
@@ -265,13 +268,11 @@ class HedgesBonitoBase:
             other_C=t
         start_state = torch.argmax(current_scores,dim=1).to('cpu').numpy() 
         out_set=[]
-        print(start_state)
-        print(BT_bases[0,:,-10])
-        print(current_scores)
+        #print(current_scores)
         for i in range(N):
             seq =self.string_from_backtrace(BT_index[i,:,:],BT_bases[i,:,:],start_state[i])
             if reverse.numpy()[i]: out_set.append(self._fastforward_seq+complement(seq))  
-            else: out_set.append(self._fastforward_sew+seq)   
+            else: out_set.append(self._fastforward_seq+seq)   
         return out_set
 
 
