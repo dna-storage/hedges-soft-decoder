@@ -65,28 +65,38 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
         ret_tensor[:,1::2]=seq
         return ret_tensor 
     
-    def init_initial_state_F(self, scores:torch.Tensor,reverse:torch.Tensor) -> torch.Tensor:
+    def init_initial_state_F(self, scores:torch.Tensor,reverse:torch.Tensor,virtual_score_endpoints:torch.Tensor) -> torch.Tensor:
         N,T,I = scores.size()
-        if self._window>0:
-            scores_per_base = T/self._full_message_length
-            strand_index = len(self._fastforward_seq)-1
-            lower_t_range=int(max(((strand_index)*scores_per_base)-self._window,0))
-            upper_t_range=int(min((strand_index*scores_per_base)+self._window,T-self._full_message_length+strand_index+1))
-            self._current_F_lower = lower_t_range
-        else:
-            lower_t_range =0
-            upper_t_range = T
-        T_range = upper_t_range-lower_t_range
-        F = scores.new_full((N,T_range,self._H),Log.zero)
-        #nothing to do if there is no initial strand
-        if len(self._fastforward_seq)==0: return F
-        #For batching, account for reverse and forward indexes
         forward_strand_indexes = HedgesBonitoCTC.string_to_indexes(self._fastforward_seq,self._letter_to_index,batch=N)
         reverse_strand_indexes = HedgesBonitoCTC.string_to_indexes(complement(self._fastforward_seq),self._letter_to_index,batch=N)
         strand_indexes = torch.where(reverse[:,None].expand(-1,len(self._fastforward_seq)),reverse_strand_indexes,forward_strand_indexes)
         padded_strand = HedgesBonitoCTC.insert_blanks(strand_indexes)[:,:-1] #leave off last blank due to viterbi branch path nature
-        strand_index_matrix = padded_strand[:,None,:].expand(-1,T_range,-1).to(scores.get_device())#TxL matrix
-        scores_matrix = scores[:,lower_t_range:upper_t_range,:].gather(2,strand_index_matrix) #get log probabilities for each base at each time point
+        if self._window>0:
+            scores_per_base = virtual_score_endpoints/self._full_message_length
+            strand_index = len(self._fastforward_seq)-1
+            lower_t_range,_=torch.max(torch.stack([(strand_index*scores_per_base)-self._window,torch.zeros((N,))],dim=1),dim=1)
+            upper_t_range,_=torch.min(torch.stack([(strand_index*scores_per_base)+self._window,
+                                    virtual_score_endpoints-self._full_message_length+strand_index+1]
+                                    ,dim=1),dim=1)
+            self._current_F_virtual_indexes = torch.stack([lower_t_range,upper_t_range],dim=1)
+            F=scores.new_full((N,self._window*2,self._H),Log.zero)
+            T_range=self._window*2
+        else:
+            lower_t_range = torch.zeros((N,))
+            upper_t_range = torch.full((N,),T)
+            F=scores.new_full((N,T,self._H),Log.zero)
+            self._current_F_virtual_indexes = torch.stack([lower_t_range,upper_t_range],dim=1)
+            T_range=T
+        #nothing to do if there is no initial strand
+        if len(self._fastforward_seq)==0: return F
+        #For batching, account for reverse and forward indexes
+        strand_index_matrix = padded_strand[:,None,:].expand(-1,F.size(1),-1).to(scores.get_device())#TxL matrix
+        scores_matrix=torch.full_like(strand_index_matrix,Log.zero,dtype=torch.float)
+        for i in range(N):
+            lower = int(self._current_F_virtual_indexes[i,0])
+            upper = int(self._current_F_virtual_indexes[i,1])
+            upper +=(T_range-(upper-lower))
+            scores_matrix[i,:,:] = scores[i,lower:upper,:].gather(1,strand_index_matrix[i,:,:])
         N,_,L = scores_matrix.size()
         running_alpha = scores.new_full((N,L+2,),Log.zero) #1 dimensional tensor that tracks alpha for all characters at time t
         #need a mask matrix for repeats
@@ -112,25 +122,28 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
         N,T,A = scores.size()
         N,H,E,L_trans = base_transitions.size()
         using_window=False
+        self._current_F_virtual_indexes = self._current_F_virtual_indexes.to(self._device)
         if self._window and self._window>0:
             using_window=True
-            scores_per_base=torch.argmax(F[:,0],dim=0)+self._current_F_lower
-            lower_t_range=int(max((scores_per_base)-self._window,strand_index+1-L_trans//2,self._current_F_lower+1))
-            upper_t_range=int(min(scores_per_base+self._window,T-self._full_message_length+strand_index+1))
-            T_range = upper_t_range-lower_t_range
-            #need to create a NxHx2^nbitsxL tensor to represent all strings we are calculating alphas for var in collection:
-            targets = torch.concat([initial_bases[:,:,:,None],base_transitions],dim=3)
+            scores_per_base=torch.argmax(F[:,:,0],dim=1)+self._current_F_virtual_indexes[:,0].to(self._device)
+            
+            lower_t_range,_=torch.max(torch.stack([scores_per_base-self._window,scores.new_full((N,),
+                                                strand_index+1-L_trans//2),self._current_F_virtual_indexes[:,0]+1],dim=1)
+                                    ,dim=1)
+            upper_t_range,_=torch.min(torch.stack([scores_per_base+self._window,time_range_end-self._full_message_length+strand_index+1],dim=1),dim=1)
+            targets = torch.concat([initial_bases[:,:,:,None],base_transitions],dim=3).to(torch.int32)
             N,_,_2,L = targets.size()
         else: #base, no window case
-            lower_t_range=strand_index+1-L_trans//2
-            upper_t_range=T-self._full_message_length+strand_index+1
+            lower_t_range=scores.new_full((N,),strand_index+1-L_trans//2).to(self._device)
+            upper_t_range=scores.new_full((N,),T-self._full_message_length+strand_index+1).to(self._device)
             #need to create a Hx2^nbitsxL tensor to represent all strings we are calculating alphas for var in collection:
-            targets = torch.concat([initial_bases[:,:,:,None],base_transitions],dim=3)
+            targets = torch.concat([initial_bases[:,:,:,None],base_transitions],dim=3).to(torch.int32)
             N,_,_2,L = targets.size()
         mask = torch.nn.functional.pad(targets[:,:,:,2:]==targets[:,:,:,:-2],(1,0),value=1)
         #calculate valid ranges of t to avoid unnecessary iterations
-        out_scores = self._fwd_algorithm(targets,scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,lower_t_range-self._current_F_lower,alpha_t,time_range_end)
-        self._current_F_lower=lower_t_range #keeps track of most recent lower_t_range
+        out_scores = self._fwd_algorithm(targets,scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,
+                                         lower_t_range-self._current_F_virtual_indexes[:,0],alpha_t,time_range_end,self._current_F_virtual_indexes)
+        self._current_F_virtual_indexes[:,:] = torch.stack([lower_t_range,upper_t_range],dim=1)
         return out_scores
 
     
@@ -147,23 +160,36 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
     @classmethod
     def _fwd_algorithm(cls, targets: torch.Tensor,scores: torch.Tensor, mask: torch.Tensor,
                        F: torch.Tensor, lower_t_range: int, upper_t_range: int,device,
-                       using_window,pad,alpha_t:torch.Tensor,time_range_end:torch.Tensor)->torch.Tensor:
+                       using_window,pad,alpha_t:torch.Tensor,time_range_end:torch.Tensor,current_F_virtual_indexes)->torch.Tensor:
         N,H,E,L=targets.size()
+        time_range_end=time_range_end.to(torch.int32).to(device)
         L-=1
         #convert mask from bools to floats to avoid control flow in GPU kernel
         mask = torch.where(mask,torch.full(mask.size(),Log.zero,device=device),torch.full(mask.size(),Log.one,device=device))
         w=F.to(device)
         out_scores = targets.new_zeros((N,H,E),dtype=torch.float)
         if not using_window:
-            r_1 = lower_t_range
-            r_2 = upper_t_range
-            f_offset=int(-1)
-            lower_t_range_offset=0
+            r_1 = lower_t_range.to(torch.int32).to(device)
+            r_2 = upper_t_range.to(torch.int32).to(device)
+            f_offset=scores.new_full((N,),int(-1),dtype=torch.int32)
+            lower_t_range_offset=scores.new_zeros((N,)).to(torch.int32).to(device)
+            F_end_range = torch.full((N,),F.size(1),dtype=torch.int32,device=device)
+            assert r_1.size()==r_2.size()==f_offset.size()==lower_t_range_offset.size()==F_end_range.size()
         else:
-            r_1 = 0
-            r_2 = upper_t_range-lower_t_range
-            f_offset=pad-1
-            lower_t_range_offset=lower_t_range
+            r_1 = torch.zeros((N,)).to(torch.int32).to(device)
+            r_2 = (upper_t_range-lower_t_range).to(torch.int32).to(device)
+            f_offset=(pad-1).to(torch.int32).to(device)
+            lower_t_range_offset=lower_t_range.to(torch.int32).to(device)
+            F_end_range = (current_F_virtual_indexes[:,1]-current_F_virtual_indexes[:,0]).to(torch.int32).to(device)
+            assert r_1.size()==r_2.size()==f_offset.size()==lower_t_range_offset.size()==F_end_range.size()
+            #print("r_1 {}".format(r_1))
+            #print("r_2 {}".format(r_2))
+            #print("f_offset {}".format(f_offset))
+            #print("lower_t_range_offset {}".format(lower_t_range_offset))
+            #print("F_end_range {}".format(F_end_range))
+            #print("Time range end {}".format(time_range_end))
+            
+
         with cp.cuda.Device(0):
             #Need to break down L,H,E into block sizes <=1024
             #L can't be moved because of thread sync. dependency
@@ -172,10 +198,14 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             max_T_per_block=128 #max threads to have per block
             h_per_block = max_T_per_block//(L*E)
             H_blocks = (H//h_per_block)+1
-            HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,N,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,args=(targets.data_ptr(),scores.data_ptr(),alpha_t.data_ptr(),
-                                                                                                                                   mask.data_ptr(),w.data_ptr(),
-                                                                                                                                   out_scores.data_ptr(),r_1,r_2,
-                                                                                                                                   H,E,L,2,1,f_offset,F.size(1),scores.size(1),lower_t_range_offset,time_range_end.data_ptr()))
+            HedgesBonitoCTCGPU.fwd_alg_kernel(grid=(H_blocks,N,1),block=(L,h_per_block,E),shared_mem=2*4*(L+2)*h_per_block*E,
+                                              args=(targets.data_ptr(),scores.data_ptr(),alpha_t.data_ptr(),
+                                                    mask.data_ptr(),w.data_ptr(),
+                                                    out_scores.data_ptr(),r_1.data_ptr(),r_2.data_ptr(),
+                                                    H,E,L,2,1,f_offset.data_ptr(),F.size(1),scores.size(1),lower_t_range_offset.data_ptr(),
+                                                    time_range_end.data_ptr(),F_end_range.data_ptr()))
+        #print(torch.max(out_scores[0,:,:]))
+        #exit(0)
         return out_scores
         
     

@@ -196,7 +196,7 @@ class HedgesBonitoBase:
         scores_gpu= scores.to(self._device)
 
         #setup forward arrays
-        F=self._scorer.init_initial_state_F(scores_gpu,reverse) #initialize the state corresponding to the initial valid state of the trellis
+        F=self._scorer.init_initial_state_F(scores_gpu,reverse,time_range_end) #initialize the state corresponding to the initial valid state of the trellis
         temp_f_outgoing = torch.full((N,F.size(1),self._H,2**self._max_bits),Log.zero,device=self._device)
         
         
@@ -268,7 +268,7 @@ class HedgesBonitoBase:
             other_C=t
         start_state = torch.argmax(current_scores,dim=1).to('cpu').numpy() 
         out_set=[]
-        #print(current_scores)
+        print(current_scores)
         for i in range(N):
             seq =self.string_from_backtrace(BT_index[i,:,:],BT_bases[i,:,:],start_state[i])
             if reverse.numpy()[i]: out_set.append(self._fastforward_seq+complement(seq))  

@@ -38,8 +38,9 @@ __device__ __forceinline__ FLOAT mul(FLOAT a, FLOAT b) {return a * b;}
 
 #define NBASE 5
 typedef long long int int64_t;
+typedef int int32_t;
 
-#define PREFETCH 4
+#define PREFETCH 0
 
 __device__ __forceinline__ void pfL1(const FLOAT* a){
     asm("prefetch.global.L1 [%0];"
@@ -49,93 +50,27 @@ __device__ __forceinline__ void pfL1(const FLOAT* a){
 
 
 
-extern "C" __global__ void fwd_logspace(
-					    const int64_t* __restrict__ targets,
-					    const FLOAT* __restrict__ scores,
-					    FLOAT* __restrict__ alpha_t,
-					    const FLOAT* __restrict__ mask,
-					    const FLOAT* __restrict__ F,
-					    int lower_t_range,
-					    int upper_t_range,
-					    int H,
-					    int E,
-					    int L,
-					    int L_pad,
-					    int target_score_pad,
-					    int F_offset,
-					    int F_T,
-					    int abs_lower_t_range_offset
-					)
-
-
-
-{
-  int Lidx = threadIdx.x, Eidx = threadIdx.z, Hidx=threadIdx.y+blockIdx.x*blockDim.y , blockHidx=threadIdx.y;
-  int total_L = L+L_pad;
-  int HEL_stride = blockDim.y*E*total_L;
-  int EL_stride = E*total_L;
-  int blockH_EL = blockHidx*EL_stride;
-  
-
-  int64_t target = targets[Hidx*E*(L+target_score_pad)+ Eidx*(L+target_score_pad)+ (Lidx+target_score_pad)];
-  extern __shared__ FLOAT smem[];
-  if(Hidx>=H) return; //get rid of dead threads
-  //smem needs to be initialized to time -1 so forward algorithm can go ahead
-  if(Lidx==0) smem[(lower_t_range%2)*HEL_stride+ blockHidx*EL_stride + Eidx*(total_L) + Lidx] = ZERO;
-  if(Lidx==1) smem[(lower_t_range%2)*HEL_stride+ blockHidx*EL_stride + Eidx*(total_L) + Lidx] = F[(lower_t_range+F_offset)*H+Hidx];
-  smem[(lower_t_range%2)*HEL_stride+blockHidx*EL_stride+Eidx*(total_L)+(Lidx+L_pad)] = ZERO; 
-  __syncthreads();
-   int fetch_ptr = 0;//index to keep track of what prefetch we use/need to update	
-  if(Lidx==1){ //try some asynchroniouse mem copies
-       for(int i=0; i<PREFETCH; i++) pfL1(&F[(lower_t_range+F_offset+1+i)*H+Hidx]);
-  }  
-  float mask_value = mask[Hidx*E*L+Eidx*L+Lidx];
-  int smem_select = lower_t_range%2;
-  for(int t=lower_t_range; t<upper_t_range;t++){
-    //perform core calculations for forward algorithm
-    FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back
-    int next_smem = ~smem_select&0x01;
-    int f_t = (t+1+F_offset);
-    a = smem[(smem_select)*HEL_stride+ blockH_EL + Eidx*total_L+ (Lidx+L_pad)];
-    a1 = smem[(smem_select)*HEL_stride+ blockH_EL + Eidx*total_L + (Lidx+L_pad-1)];
-    a2 =  MUL(smem[(smem_select)*HEL_stride + blockH_EL + Eidx*total_L+ (Lidx+L_pad-2)],mask_value);
-    score = scores[(abs_lower_t_range_offset+t)*NBASE+target];  	
-    final_score = MUL(score,SUM(a,a1,a2));
-    smem[(((next_smem)))*HEL_stride + blockHidx*EL_stride + Eidx*total_L+(Lidx+L_pad)]=final_score;
-    if(Lidx==0) smem[(next_smem)*HEL_stride+ blockHidx*EL_stride+ Eidx*(total_L)+ Lidx] = ZERO;
-    else if (Lidx==1){      
-      pfL1(&F[(f_t+PREFETCH)*H+Hidx]);
-      if(f_t<F_T) smem[(next_smem)*HEL_stride + blockHidx*EL_stride + Eidx*total_L + Lidx] = F[f_t*H + Hidx];
-      else smem[(next_smem)*HEL_stride + blockHidx*EL_stride + Eidx*total_L + Lidx] = ZERO;
-    }
-    __syncthreads();
-    //moved write to after sync 
-    if (Lidx==L-1)alpha_t[ t*H*E+ Hidx*E+ Eidx] = final_score;
-    smem_select=next_smem;
-  }
-}
-
-
-
 extern "C" __global__ void fwd_logspace_reduce(
-					    const int64_t* __restrict__ targets,
-					    const FLOAT* __restrict__ scores,
-					    FLOAT* __restrict__ alpha_t,
-					    const FLOAT* __restrict__ mask,
-					    const FLOAT* __restrict__ F,
-              				    FLOAT* __restrict__ out_scores,
-					    int lower_t_range,
-					    int upper_t_range,
-					    int H,
-					    int E,
-					    int L,
-					    int L_pad,
-					    int target_score_pad,
-					    int F_offset,
-					    int F_T,
-              				    int T,
-					    int abs_lower_t_range_offset,
-					    const int64_t* __restrict__ time_range_end
+					    const int32_t* __restrict__ targets, //bases being targetted for alignment
+					    const FLOAT* __restrict__ scores, //raw emission scores
+					    FLOAT* __restrict__ alpha_t,  //output alignments
+					    const FLOAT* __restrict__ mask, //mask off matches
+					    const FLOAT* __restrict__ F, //previous alignment
+              				    FLOAT* __restrict__ out_scores, //output scores
+					    const int32_t* __restrict__ lower_t_range_ptr, //start point for iterating
+					    const int32_t* __restrict__ upper_t_range_ptr, //end point for iterating
+					    int H, //number of hedges states
+					    int E, //number of transitions
+					    int L, //actual number of L positions calculated
+					    int L_pad, //paddding needed for shared mem
+					    int32_t target_score_pad, //padding from lower_t_range to actual index
+					    const int32_t* __restrict__ F_offset_ptr, //offset between absolute position of new alignment and previous
+					    int F_T, // time dimension of F matrix
+              				    int T, //time dimension of scores matrix
+					    
+					    const int32_t*__restrict__ abs_lower_t_range_offset_ptr, //offset to absolute position of emissions scores
+					    const int32_t* __restrict__ time_range_end, //endpoint of emissions for batch
+					    const int32_t* __restrict__ F_end //endpoint of F for batch
 					)
 
 
@@ -147,9 +82,18 @@ extern "C" __global__ void fwd_logspace_reduce(
   const int HEL_stride = blockDim.y*E*total_L;
   const int EL_stride = E*total_L;
   const int blockH_EL = blockHidx*EL_stride;
-  const int abs_time_endpoint = time_range_end[Nidx];
   FLOAT reduction_value=ZERO;
   FLOAT next_t_score=ZERO;
+
+  //load offsets for this batch
+  const int lower_t_range = lower_t_range_ptr[Nidx];
+  const int upper_t_range = upper_t_range_ptr[Nidx];
+  const int F_offset=F_offset_ptr[Nidx];
+  const int abs_lower_t_range_offset=abs_lower_t_range_offset_ptr[Nidx];
+  const int abs_time_endpoint = time_range_end[Nidx];
+  const int f_endpoint = F_end[Nidx];
+
+  //if(Nidx>0) printf("  %d %d %d %d %d %d \n",lower_t_range,upper_t_range,F_offset,abs_lower_t_range_offset,abs_time_endpoint,f_endpoint);
 
   int64_t target = targets[Nidx*H*E*(L+target_score_pad)+Hidx*E*(L+target_score_pad)+ Eidx*(L+target_score_pad)+ (Lidx+target_score_pad)];
   extern __shared__ FLOAT smem[];
@@ -182,17 +126,18 @@ extern "C" __global__ void fwd_logspace_reduce(
     if(Lidx==0) smem[(next_smem)*HEL_stride+ blockHidx*EL_stride+ Eidx*(total_L)+ Lidx] = ZERO;
     else if (Lidx==1){      
       pfL1(&F[Nidx*H*F_T+(f_t+PREFETCH)*H+Hidx]);
-      if(f_t<F_T) smem[(next_smem)*HEL_stride + blockHidx*EL_stride + Eidx*total_L + Lidx] = F[Nidx*H*F_T+f_t*H + Hidx];
+      if(f_t<f_endpoint) smem[(next_smem)*HEL_stride + blockHidx*EL_stride + Eidx*total_L + Lidx] = F[Nidx*H*F_T+f_t*H + Hidx];
       else smem[(next_smem)*HEL_stride + blockHidx*EL_stride + Eidx*total_L + Lidx] = ZERO;
     }
     __syncthreads();
     //moved write to after sync 
     if (Lidx==L-1){
-      alpha_t[Nidx*H*T*E+t*H*E+ Hidx*E+ Eidx] = final_score; //TODO: this needs to be fixed for window sizes
+      alpha_t[Nidx*H*F_T*E+t*H*E+ Hidx*E+ Eidx] = final_score; //TODO: this needs to be fixed for window sizes
     }
 
     //reduce final score 
     reduction_value = SUM2(reduction_value,MUL(final_score,LOG(1-EXP(next_t_score))));
+    //if(Nidx==1 && Lidx==L-1) printf("reduction value %f\n",reduction_value);
     smem_select=next_smem;
   }
   if(Lidx==L-1) out_scores[Nidx*H*E+Hidx*E+Eidx]=reduction_value;
@@ -245,33 +190,6 @@ extern "C" __global__ void fwd_logspace_align(
     BT[Nidx*T*(L)+t*(L)+Lidx]=Lidx-(a_+a1_+a2_);
     smem[Nidx_t*total_L*2+(((t+1)%2))*total_L+(Lidx+L_pad)]=final_score;
     __syncthreads();
-  }
-}
-
-
-extern "C" __global__ void dot_mul(
-					    const int64_t* __restrict__ targets,
-					    const FLOAT* __restrict__ scores,
-					    const FLOAT* __restrict__ alpha_t,
-					    FLOAT* __restrict__ output,
-					    int T,
-  				            int target_scores_L,
-              				    int H,
-					    int E,
-					    int abs_t_lower
-				   )
-{
-  int Tidx = threadIdx.z+blockDim.z*blockIdx.x;
-  int Hidx = threadIdx.y+blockDim.y*blockIdx.y;
-  int Eidx = threadIdx.x;
-  int target = targets[Hidx*E*target_scores_L+Eidx*target_scores_L+target_scores_L-1];
-  if(Tidx<T){
-    int idx = Tidx*H*E+Hidx*E+Eidx;
-    int idx2= (Tidx+1+abs_t_lower)*NBASE+target;
-    if(Tidx+1<T)
-      output[idx] = MUL(alpha_t[idx],SUM2(0,scores[idx2]));
-    else
-      output[idx] = alpha_t[idx];
   }
 }
 
