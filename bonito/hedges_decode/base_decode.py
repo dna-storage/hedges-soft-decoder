@@ -268,7 +268,7 @@ class HedgesBonitoBase:
             other_C=t
         start_state = torch.argmax(current_scores,dim=1).to('cpu').numpy() 
         out_set=[]
-        print(current_scores)
+        #print(current_scores)
         for i in range(N):
             seq =self.string_from_backtrace(BT_index[i,:,:],BT_bases[i,:,:],start_state[i])
             if reverse.numpy()[i]: out_set.append(self._fastforward_seq+complement(seq))  

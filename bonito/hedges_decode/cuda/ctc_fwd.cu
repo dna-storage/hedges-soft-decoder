@@ -26,7 +26,7 @@ __device__ __forceinline__ FLOAT logsumexp2(FLOAT a, FLOAT a1) {
 
 __device__ __forceinline__ FLOAT logdiffexp2(FLOAT a, FLOAT a1) {
   FLOAT maxa = max2(a, a1);
-  return maxa + LOG(exp(a-maxa) - EXP(a1-maxa));
+  return maxa + LOG(EXP(a-maxa) - EXP(a1-maxa));
 }
 
 

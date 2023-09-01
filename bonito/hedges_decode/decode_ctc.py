@@ -182,13 +182,6 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
             lower_t_range_offset=lower_t_range.to(torch.int32).to(device)
             F_end_range = (current_F_virtual_indexes[:,1]-current_F_virtual_indexes[:,0]).to(torch.int32).to(device)
             assert r_1.size()==r_2.size()==f_offset.size()==lower_t_range_offset.size()==F_end_range.size()
-            #print("r_1 {}".format(r_1))
-            #print("r_2 {}".format(r_2))
-            #print("f_offset {}".format(f_offset))
-            #print("lower_t_range_offset {}".format(lower_t_range_offset))
-            #print("F_end_range {}".format(F_end_range))
-            #print("Time range end {}".format(time_range_end))
-            
 
         with cp.cuda.Device(0):
             #Need to break down L,H,E into block sizes <=1024
@@ -204,8 +197,6 @@ class HedgesBonitoCTCGPU(HedgesBonitoCTC):
                                                     out_scores.data_ptr(),r_1.data_ptr(),r_2.data_ptr(),
                                                     H,E,L,2,1,f_offset.data_ptr(),F.size(1),scores.size(1),lower_t_range_offset.data_ptr(),
                                                     time_range_end.data_ptr(),F_end_range.data_ptr()))
-        #print(torch.max(out_scores[0,:,:]))
-        #exit(0)
         return out_scores
         
     

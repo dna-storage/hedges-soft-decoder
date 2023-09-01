@@ -141,7 +141,8 @@ def main(args):
         window=args.window,
         trellis=args.trellis,
         mod_states=args.mod_states,
-        processes=args.processes
+        processes=args.processes,
+        batch_size=args.batch_size
     )
     
     if mods_model is not None:
@@ -228,4 +229,5 @@ def argparser():
     parser.add_argument("--lower_index",action="store",type=int,default=0,help="Index to start for basecalling in the data set, INCLUSIVE")
     parser.add_argument("--upper_index",action="store",type=int,default=10**9,help="Index to stop for basecalling, NOT_INCLUSIVE")
     parser.add_argument("--processes",action="store",type=int,default=1,help="processes to use for parallelizing basecalling")
+    parser.add_argument("--batch_size",action="store",type=int,default=1,help="number of strands to batch for basecalling")
     return parser

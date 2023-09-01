@@ -120,13 +120,14 @@ def hedges_decode(read_id,scores_arg,hedges_params:str,hedges_bytes:bytes,
             padded_scores = (torch.nn.functional.pad(s,(0,0,0,max_score_length-s.size(0)),value=-1000) for s in after_alignment_scores)
             viterbi_scores = torch.stack(list(padded_scores)) #viterbi scores should hold all scores now, padded
             time_range_end = torch.tensor(time_range_end,dtype=torch.int64)
+            if viterbi_scores.size(1)<decoder._full_message_length: raise ValueError("Too small time dimension")
             logger.info("Score tensor after align: {}".format(viterbi_scores.size()))
             del aligner
             del after_alignment_scores
             gc.collect()
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
-            print(torch.cuda.mem_get_info())
+            #print(torch.cuda.mem_get_info())
             if window>0 and window<1: decoder.window=int(window*viterbi_scores.size(1)/2) # 1 window for all scores
             seq_batch = decoder.decode(viterbi_scores,reverse_tensor,time_range_end)
 

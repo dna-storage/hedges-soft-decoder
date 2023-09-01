@@ -49,7 +49,7 @@ def basecall(model, reads, beamsize=5, chunksize=0, overlap=0, batchsize=1, qsco
         decoder = partial(hedges_decode,hedges_params = kwargs["hedges_params"],hedges_bytes=kwargs["hedges_bytes"],
                           using_hedges_DNA_constraint=kwargs["hedges_using_DNA_constraint"],alphabet=alphabet,endpoint_seq=kwargs["strand_pad"],window=kwargs["window"],
                           trellis=kwargs["trellis"],mod_states=kwargs["mod_states"])
-        scores=hedges_batch_scores(scores,kwargs["hedges_batchsize"])
+        scores=hedges_batch_scores(scores,kwargs["batch_size"])
     else:
         decoder = partial(decode, decode=model.decode, beamsize=beamsize, qscores=qscores, stride=model.stride)
     basecalls = process_map(decoder, scores, n_proc=kwargs["processes"])
