@@ -1,12 +1,7 @@
 #!/bin/bash                                                                                                                                                           
 
-source /home/${USER}/.bashrc
-module unload cuda
-conda activate bonito_cuda
-
-
 window_size=0
-mods=(3 7 15)
+mods=(7 15)
 strand_fast5=("221118_dna_volkel_strand1_fast5_10k_subset" "221118_dna_volkel_strand2_fast5_10k_subset")
 declare -a li_strand1=(0 2000 4000 6000 8000)
 declare -a li_strand2=(0 2000 4000 6000 8000)
@@ -17,7 +12,7 @@ declare -a ui_strand2=(2000 4000 6000 8000 10000)
 declare -a upper_indexes=("(${ui_strand1[*]@Q})" "(${ui_strand2[*]@Q})")
 
 strand_byte_index=(0 8)
-GPU=rtx2060super
+GPU=rtx2070
 
 echo "RUNNING mod experiments"
 for strandId in {0..1};
@@ -44,7 +39,7 @@ do
 	    echo "Lower Index $lower_index"
 	    echo "Upper Index $upper_index"
             echo "--------------------------------------------------------------"
-            sbatch --time "24:00:00" --exclude="c[78-94],c[60]"  -J mod_experiments_${window_size}_${mod} -o $PAUL_NANOPORE_DATA/${out_file} -e $PAUL_NANOPORE_DATA/${err_file} -N 1 -n 1 -p ${GPU} --wrap "bonito basecaller dna_r9.4.1@v2 $PAUL_NANOPORE_DATA/${fast5_path} --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes 204 ${byte_index} --hedges_params $PAUL_NANOPORE_DATA/hedges_decode_ctc_debug/hedges_options.json --disable_half --window ${window_size} --trellis mod --mod_states ${mod} --lower_index ${lower_index} --upper_index ${upper_index} --processes 1"
+            sbatch --time "24:00:00" --exclude="c21,c32,c34,c[58-59],c68"  -J mod_experiments_${window_size}_${mod} -o $PAUL_NANOPORE_DATA/${out_file} -e $PAUL_NANOPORE_DATA/${err_file} -N 1 -n 1 -p ${GPU} --wrap "source /home/${USER}/.bashrc && module unload cuda && conda activate bonito_cuda && bonito basecaller dna_r9.4.1@v2 $PAUL_NANOPORE_DATA/${fast5_path} --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes 204 ${byte_index} --hedges_params $PAUL_NANOPORE_DATA/hedges_decode_ctc_debug/hedges_options.json --disable_half --window ${window_size} --trellis mod --mod_states ${mod} --lower_index ${lower_index} --upper_index ${upper_index} --processes 1"
 	done
     done
 done

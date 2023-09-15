@@ -345,8 +345,9 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
                     level = int(math.floor(math.log2(mod+1)))
                     #need to select the previous state and the mod from the previous state
                     base = mod - sum([2**i for i in range(0,level)])
-                    mod_from_prev_state = base>>1
+                    mod_from_prev_state = (base>>1) + (sum([2**i for i in range(0,level-1)]))
                     prev_state = base&0x1
+                    #print("Mod {} Mod from prev {} level {} base".format(mod,mod_from_prev_state,level,base)) 
                     mask[h,prev_state*self._mod+mod_from_prev_state]=1
             l.append(mask.bool())
         type(self)._mask_cache[cache_key]=l

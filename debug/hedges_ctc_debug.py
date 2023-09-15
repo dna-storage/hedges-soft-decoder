@@ -31,7 +31,7 @@ if __name__ =="__main__":
     b = bytes([204,0])
     endpoint_str="GGCGACAGAAGAGTCAAGGTTC"
     #quick debug of decoding
-    for read,scores in debug_data:
+    for read,scores in debug_data[::-1]:
         logger.info("Decoding Read: {}".format(read))
         logger.info(scores.size())
         time_start=time.time()
