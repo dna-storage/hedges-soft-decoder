@@ -155,12 +155,12 @@ class HedgesBonitoBase:
             #h_per_block = 1024
             h_per_block = 256
             t_per_block = 4
-            H_blocks=return_F.size(2)//h_per_block
+            H_blocks=(return_F.size(2)//h_per_block)
             T_blocks = (return_F.size(1)//t_per_block)
             if return_F.size(1)%t_per_block!=0: T_blocks+=1
             trellis_incoming_indexes_gpu = trellis_incoming_indexes.to(self._device)
             trellis_incoming_value_gpu = trellis_incoming_value.to(self._device)
-            max_vals = value_of_max_scores 
+            max_vals = value_of_max_scores
             HedgesBonitoBase.get_new_F_kernel(grid=(H_blocks,T_blocks,N),block=(h_per_block,t_per_block,1),shared_mem=0,args=(temp_f_outgoing.data_ptr(),
                                                                                                             trellis_incoming_indexes_gpu.data_ptr(),
                                                                                                             trellis_incoming_value_gpu.data_ptr(),
@@ -248,13 +248,14 @@ class HedgesBonitoBase:
                 #masking allows us to effectively eliminate non-sensical scores for given contexts
                 if not mask is None:
                     state_scores = torch.where(mask.to(self._device).bool()[None,:,:].expand(N,-1,-1),state_scores,state_scores.new_full(state_scores.size(),Log.zero))
-
+                    
                 m,argmax_scores= torch.max(state_scores,dim=2) # NxH-length vectror indicating location of best score
                 current_scores=m#state_scores.gather(2,argmax_scores[:,:,None])
+                #if isinstance(self,HedgesBonitoDelayStates):
+                #    print("i {} {} \n".format(i,torch.max(state_transition_scores_outgoing)))
                 cpu_argmax_scores = argmax_scores.to("cpu")
                 if not mask is None:    
                     state_is_dead=(m<=Log.zero).to(torch.uint8).to("cpu")
-                #print(current_scores)
                 #update back trace matrices
                 BT_index[:,:,i-sub_length] = trellis_incoming_indexes[H_range,cpu_argmax_scores] #set the back trace index with best incoming state
                 BT_bases[:,:,i-sub_length] = bases[N_range,H_range,cpu_argmax_scores] #set base back trace matrix
@@ -268,7 +269,6 @@ class HedgesBonitoBase:
             other_C=t
         start_state = torch.argmax(current_scores,dim=1).to('cpu').numpy() 
         out_set=[]
-        #print(current_scores)
         for i in range(N):
             seq =self.string_from_backtrace(BT_index[i,:,:],BT_bases[i,:,:],start_state[i])
             if reverse.numpy()[i]: out_set.append(self._fastforward_seq+complement(seq))  
@@ -310,12 +310,14 @@ class HedgesBonitoDelayStates(HedgesBonitoBase):
                 if mod==0:
                     value,incoming_states = hedges_hooks.get_incoming_states(self._global_hedge_state_init,nbits,history)
                     for s in range(len(incoming_states)):
-                        for i in range(2**(self._height-1)-1,self._mod): mask[h,s*self._mod+i]=1
+                        for i in range(2**(self._height-1)-1,self._mod):
+                            mask[h,s*self._mod+i]=1
+
                 else:
                     level = int(math.floor(math.log2(mod+1)))
                     #need to select the previous state and the mod from the previous state
                     base = mod - sum([2**i for i in range(0,level)])
-                    mod_from_prev_state = base>>1
+                    mod_from_prev_state = (base>>1) + (sum([2**i for i in range(0,level-1)]))
                     prev_state = base&0x1
                     mask[h,prev_state*self._mod+mod_from_prev_state]=1
             l.append(mask.bool())

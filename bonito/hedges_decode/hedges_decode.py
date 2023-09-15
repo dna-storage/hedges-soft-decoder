@@ -75,7 +75,7 @@ def hedges_decode(read_id,scores_arg,hedges_params:str,hedges_bytes:bytes,
                 decoder = HedgesBonitoBase(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet,"cuda:0","CTC",window=int(window))
             elif trellis=="mod":
                 #trellis that accounts for constraints by using the modulo state of contexts
-                decoder = HedgesBonitoDelayStates(hedges_params_dict,hedges_bytes,True,alphabet,"cuda:0","CTC",window=int(window),mod_states=mod_states)
+                decoder = HedgesBonitoDelayStates(hedges_params_dict,hedges_bytes,False,alphabet,"cuda:0","CTC",window=int(window),mod_states=mod_states)
             elif "beam" in trellis:
                 #running beam trellis
                 decoder = HedgesBonitoBeam(hedges_params_dict,hedges_bytes,using_hedges_DNA_constraint,alphabet,"cuda:0","CTC",trellis)

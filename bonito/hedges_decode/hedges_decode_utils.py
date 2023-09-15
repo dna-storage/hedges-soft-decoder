@@ -43,7 +43,7 @@ def hedges_batch_scores(scores,batchsize=1,windowsize=10000): #batch scores toge
             candidate_reads,candidate_scores = zip(*sorted(zip(reads,scores_set),key=lambda x: x[1].size(0)))
             yield bundle_scores(candidate_reads[:batchsize],candidate_scores[:batchsize])
             end = min(batchsize,len(candidate_reads))
-            scores_set=candidate_socres[end:]
+            scores_set=candidate_scores[end:]
             reads=candidate_reads[end:]
             window_counter=len(reads)
     if len(reads)>0:

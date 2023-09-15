@@ -132,7 +132,7 @@ extern "C" __global__ void fwd_logspace_reduce(
     __syncthreads();
     //moved write to after sync 
     if (Lidx==L-1){
-      alpha_t[Nidx*H*F_T*E+t*H*E+ Hidx*E+ Eidx] = final_score; //TODO: this needs to be fixed for window sizes
+      alpha_t[Nidx*H*F_T*E+t*H*E+ Hidx*E+ Eidx] = final_score; 
     }
 
     //reduce final score 
