@@ -17,7 +17,7 @@ declare -a upper_indexes=("(${ui_strand1[*]@Q})" "(${ui_strand2[*]@Q})")
 
 strand_byte_index=(0 8)
 GPU=rtx2060super
-
+ 
 echo "RUNNING beam experiments"
 for strandId in {0..1};
 do

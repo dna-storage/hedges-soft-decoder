@@ -142,7 +142,8 @@ def main(args):
         trellis=args.trellis,
         mod_states=args.mod_states,
         processes=args.processes,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        ctc_dump=args.ctc_fast5
     )
     
     if mods_model is not None:
@@ -230,4 +231,5 @@ def argparser():
     parser.add_argument("--upper_index",action="store",type=int,default=10**9,help="Index to stop for basecalling, NOT_INCLUSIVE")
     parser.add_argument("--processes",action="store",type=int,default=1,help="processes to use for parallelizing basecalling")
     parser.add_argument("--batch_size",action="store",type=int,default=1,help="number of strands to batch for basecalling")
+    parser.add_argument("--ctc_fast5",action="store",type=str,default=None,help="filename for dumping ctc data from the decoder")
     return parser

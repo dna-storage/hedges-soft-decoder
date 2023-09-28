@@ -14,6 +14,8 @@ import sys
 import traceback
 import time
 import logging
+import h5py
+
 logger=logging.getLogger(__name__)
 logger.addHandler(logging.NullHandler())
 
@@ -38,9 +40,12 @@ def check_hedges_params(hedges_params_dict)->None:
 
 
 
+
+        
+        
 def hedges_decode(read_id,scores_arg,hedges_params:str,hedges_bytes:bytes,
                   using_hedges_DNA_constraint:bool,alphabet:list,stride=1,
-                  endpoint_seq:str="",window=0,trellis="base",mod_states=3)->dict:
+                  endpoint_seq:str="",window=0,trellis="base",mod_states=3,rna=False,ctc_dump=None)->dict:
     """
         @brief      Top level function for decoding CTC-style outputes to hedges strands
 
@@ -85,37 +90,48 @@ def hedges_decode(read_id,scores_arg,hedges_params:str,hedges_bytes:bytes,
             logger.info("Batch size {}".format(alignment_scores.size(0)))
             #create aligner
             aligner = AlignCTCGPU(alphabet,device="cuda:0")
-            f_endpoint_upper_index=torch.full((alignment_scores.size(0),),0,dtype=torch.long)
-            r_endpoint_lower_index=torch.full((alignment_scores.size(0),),alignment_scores.size(1),dtype=torch.long)
             f_endpoint_score=torch.full((alignment_scores.size(0),),Log.one,dtype=torch.float32)
             r_endpoint_score=torch.full((alignment_scores.size(0),),Log.one,dtype=torch.float32)
-            if len(endpoint_seq)>0:
-                f_endpoint_index,f_endpoint_score  = aligner.align(alignment_scores,endpoint_seq)
-                r_endpoint_index,r_endpoint_score  = aligner.align(alignment_scores,reverse_complement(endpoint_seq))
 
-            f_hedges_index,f_hedges_score = aligner.align(alignment_scores,decoder.fastforward_seq[::-1])
-            r_hedges_index,r_hedges_score = aligner.align(alignment_scores,complement(decoder.fastforward_seq))
+            if not rna:
+                if len(endpoint_seq)>0:
+                    f_endpoint_index,f_endpoint_score  = aligner.align(alignment_scores,endpoint_seq)
+                    r_endpoint_index,r_endpoint_score  = aligner.align(alignment_scores,reverse_complement(endpoint_seq))
+                f_hedges_index,f_hedges_score = aligner.align(alignment_scores,decoder.fastforward_seq[::-1])
+                r_hedges_index,r_hedges_score = aligner.align(alignment_scores,complement(decoder.fastforward_seq))
+            else:
+                #for RNA, only do forwards, and zero reverses
+                f_endpoint_index=torch.zeros((alignment_scores.size(0),2))
+                f_hedges_index,f_hedges_score = aligner.align(alignment_scores,decoder.fastforward_seq[::-1])
+                r_hedges_score = torch.full((alignment_scores.size(0),),Log.zero,dtype=torch.float32)
+                r_endpoint_score=torch.full((alignment_scores.size(0),),Log.zero,dtype=torch.float32)
 
 
+                
             forward_scores = Log.mul(f_hedges_score,f_endpoint_score)
             #logger.info("f score: {}".format(forward_scores))
             reverse_scores = Log.mul(r_hedges_score,r_endpoint_score)
             #logger.info("r score: {}".format(reverse_scores))
-
             reverse_tensor= torch.argmax(torch.stack([forward_scores,reverse_scores]),dim=0).to(torch.bool)
-            
             #logger.info("Reverse Tensor: {}".format(reverse_tensor))
-
             np_reverse = reverse_tensor.numpy()
+
+
+            
             after_alignment_scores=[]
             time_range_end = []
             for i in range(reverse_tensor.size(0)):
                 if not np_reverse[i]:
                     after_alignment_scores.append(alignment_scores[i,int(f_endpoint_index[i,1]):int(f_hedges_index[i,1]),:].flip(0))
                     time_range_end.append(after_alignment_scores[-1].size(0))
+                    if ctc_dump: return (after_alignment_scores[-1].to("cpu").numpy(),False,read_id[i])
                 else:
                     after_alignment_scores.append(alignment_scores[i,int(r_hedges_index[i,0]):int(r_endpoint_index[i,0]),:])
                     time_range_end.append(after_alignment_scores[-1].size(0))
+                    if ctc_dump: return (after_alignment_scores[-1].to("cpu").numpy(),True,read_id[i])
+
+
+            
             max_score_length = max((s.size(0) for s in after_alignment_scores))
             padded_scores = (torch.nn.functional.pad(s,(0,0,0,max_score_length-s.size(0)),value=-1000) for s in after_alignment_scores)
             viterbi_scores = torch.stack(list(padded_scores)) #viterbi scores should hold all scores now, padded
@@ -130,7 +146,6 @@ def hedges_decode(read_id,scores_arg,hedges_params:str,hedges_bytes:bytes,
             #print(torch.cuda.mem_get_info())
             if window>0 and window<1: decoder.window=int(window*viterbi_scores.size(1)/2) # 1 window for all scores
             seq_batch = decoder.decode(viterbi_scores,reverse_tensor,time_range_end)
-
             #try to clean up memory
             return [{'sequence':seq,'qstring':"*"*len(seq),'stride':stride,'moves':seq} for seq in seq_batch]
     except Exception as e:

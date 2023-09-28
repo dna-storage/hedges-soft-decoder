@@ -43,8 +43,8 @@ def hedges_batch_scores(scores,batchsize=1,windowsize=10000): #batch scores toge
             candidate_reads,candidate_scores = zip(*sorted(zip(reads,scores_set),key=lambda x: x[1].size(0)))
             yield bundle_scores(candidate_reads[:batchsize],candidate_scores[:batchsize])
             end = min(batchsize,len(candidate_reads))
-            scores_set=candidate_scores[end:]
-            reads=candidate_reads[end:]
+            scores_set=list(candidate_scores[end:])
+            reads=list(candidate_reads[end:])
             window_counter=len(reads)
     if len(reads)>0:
         assert len(reads)==len(scores_set)
@@ -56,3 +56,12 @@ def hedges_batch_scores(scores,batchsize=1,windowsize=10000): #batch scores toge
             scores_set=scores_set[end:]
     
 
+
+
+def unpack_basecalls(basecalls): #splits basecalls up if the basecall process was batched
+    for k,v in basecalls:
+        if isinstance(v,dict):
+           yield k,v
+        else:
+            for sub_k,sub_v in zip(k,v):
+                yield sub_k,sub_v

@@ -92,5 +92,7 @@ class AlignCTCGPU(Align):
             AlignCTCGPU.fwd_alg_kernel(grid=(batch_blocks,1,1),block=(L,batch_per_block,1),shared_mem = (2*4*(L+2))*batch_per_block,args=(scores_gpu.data_ptr(),target_indexes.data_ptr(),F.data_ptr(),BT.data_ptr(),mask.data_ptr(),T,L,2,N))
         lower_upper_tensor = self.get_index_range(BT.to("cpu").numpy(),F.to("cpu"))
         max_score,arg_max = torch.max(F[:,:,-1],dim=1)
+        #for i,x in enumerate(F[0,:,-1].to("cpu").numpy()):
+        #    print("{}:{}".format(i,x))
         return lower_upper_tensor,max_score.to("cpu")
         

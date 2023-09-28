@@ -251,8 +251,6 @@ class HedgesBonitoBase:
                     
                 m,argmax_scores= torch.max(state_scores,dim=2) # NxH-length vectror indicating location of best score
                 current_scores=m#state_scores.gather(2,argmax_scores[:,:,None])
-                #if isinstance(self,HedgesBonitoDelayStates):
-                #    print("i {} {} \n".format(i,torch.max(state_transition_scores_outgoing)))
                 cpu_argmax_scores = argmax_scores.to("cpu")
                 if not mask is None:    
                     state_is_dead=(m<=Log.zero).to(torch.uint8).to("cpu")
