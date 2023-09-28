@@ -25,7 +25,7 @@ def dump_ctc(scores:np.ndarray,is_reverse:bool,read_id:str,h5_file:h5py.File):
     assert h5_file.name=="/"
     read_group = h5_file.create_group(read_id.read_id)
     read_group.create_dataset("reverse",data=is_reverse)
-    read_group.create_dataset("scores",data=scores,chunks=True)
+    read_group.create_dataset("scores",data=scores,chunks=True,compression="gzip")
     
 
 
