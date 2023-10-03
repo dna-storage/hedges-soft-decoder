@@ -193,3 +193,64 @@ extern "C" __global__ void fwd_logspace_align(
   }
 }
 
+extern "C" __global__ void longstrand_fwd_logspace_align(
+					    const FLOAT* __restrict__ scores, //raw CTC score matrix
+              const int64_t* __restrict__ targets, //indexes representing symbols of the string being aligned
+					    FLOAT* __restrict__ F, //Score matrix
+					    long* __restrict__ BT, //Back trace matrix
+					    const FLOAT* __restrict__ mask, //mask for knowing repeats
+					    int T, //Time dimension size
+					    int L, //This is complete global Length of the actual strand being aligned
+					    int L_pad, //Padding used to handle low indexes looking back
+              int offset //offset of L being used
+					)
+{
+  int Lidx_t = threadIdx.x;
+  int Lidx_g = Lidx_t+offset;
+  int Lidx_dim = blockDim.x+L_pad;
+  int64_t target = targets[Lidx_g];
+  extern __shared__ FLOAT smem[];
+  FLOAT mask_value = mask[Lidx];
+  if(offset==0){
+    if(Lidx_t==0){
+      smem[Lidx_t] = ONE; //set this position to constant ONE, immitates behavior of "start" symbol
+      smem[Lidx_dim+Lidx_t]=ONE;
+      mask_value = ONE; //first position needs to be able to use 2-back "start" symbol
+    }
+    else if(Lidx_t==1){
+      smem[Lidx_t] = ZERO; 
+      smem[Lidx_dim+Lidx_t] = ZERO;
+    } 
+  }
+  else{
+      //Just set the first two previous to Log(zero), reasoning is that offset>0, and scores should be undefined for t=-1 for Lidx_g-1 and Lidx_g-2
+      smem[0] = ZERO; 
+      smem[1] = ZERO;
+  }
+  smem[Lidx_t+L_pad] = ZERO;
+  __syncthreads();
+  for(int t=0;t<T;t++){
+    //perform core calculations for forward algorithm
+    FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back
+    score = scores[t*NBASE+target];
+    a = MUL(score,smem[(t%2)*Lidx_dim+(Lidx_t+L_pad)]);
+    a1 = MUL(score,smem[(t%2)*Lidx_dim+(Lidx_t+L_pad-1)]);
+    a2 =  add3(score,smem[(t%2)*Lidx_dim+(Lidx_t+L_pad-2)],mask_value);
+    final_score = max3(a,a1,a2);
+    int a_ = (a>a1 && a>a2)*0;
+    int a1_ = (a1>a && a1>a2)*1;
+    int a2_ = (a2>a && a2>a1)*2; 
+    F[(t*L+Lidx_g)]=final_score;
+    BT[t*(L)+Lidx_g]=Lidx_g-(a_+a1_+a2_);
+    smem[(((t+1)%2))*Lidx_dim+(Lidx_t+L_pad)]=final_score;
+    if(offset>0){ //need to make sure results are propagated from previous parts of the calculation when GPU-blocking is done
+      if(Lidx_t==0){
+        smem[(((t+1)%2))*Lidx_dim+Lidx_t] = F[t*L+Lidx_g-2];
+      }
+      else if(Lidx_t==1){
+        smem[(((t+1)%2))*Lidx_dim+Lidx_t] = F[t*L+Lidx_g-1];
+      } 
+    }
+    __syncthreads();
+  }
+}
