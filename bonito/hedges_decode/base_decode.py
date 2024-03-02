@@ -213,7 +213,7 @@ class HedgesBonitoBase:
         H_range=torch.arange(self._H)
         N_range=torch.arange(N)[:,None]
         pattern_counter=0
-        accumulate_base_transition=torch.full((N,self._H,2**1,3*2),0,dtype=torch.int64)
+        accumulate_base_transition=torch.full((N,self._H,2**1,4*2),0,dtype=torch.int64)
         state_is_dead = torch.zeros((N,self._H),dtype=torch.uint8)
         for i in range(self._full_message_length-self._L,self._full_message_length):
             nbits = hedges_hooks.get_nbits(self._global_hedge_state_init,i)

@@ -207,10 +207,11 @@ extern "C" __global__ void longstrand_fwd_logspace_align(
 {
   int Lidx_t = threadIdx.x;
   int Lidx_g = Lidx_t+offset;
+  if(Lidx_g>=L) return;
   int Lidx_dim = blockDim.x+L_pad;
   int64_t target = targets[Lidx_g];
   extern __shared__ FLOAT smem[];
-  FLOAT mask_value = mask[Lidx];
+  FLOAT mask_value = mask[Lidx_g];
   if(offset==0){
     if(Lidx_t==0){
       smem[Lidx_t] = ONE; //set this position to constant ONE, immitates behavior of "start" symbol
@@ -224,11 +225,12 @@ extern "C" __global__ void longstrand_fwd_logspace_align(
   }
   else{
       //Just set the first two previous to Log(zero), reasoning is that offset>0, and scores should be undefined for t=-1 for Lidx_g-1 and Lidx_g-2
-      smem[0] = ZERO; 
-      smem[1] = ZERO;
+      if(Lidx_t==0) smem[Lidx_t] = ZERO; 
+      else if (Lidx_t==1) smem[Lidx_t] = ZERO;
   }
   smem[Lidx_t+L_pad] = ZERO;
   __syncthreads();
+  //printf("Storing to Global index %i\n",Lidx_g);
   for(int t=0;t<T;t++){
     //perform core calculations for forward algorithm
     FLOAT a,a1,a2,final_score,score; //a->current string step, a1-> one string step back, a2->two string steps back
@@ -239,17 +241,16 @@ extern "C" __global__ void longstrand_fwd_logspace_align(
     final_score = max3(a,a1,a2);
     int a_ = (a>a1 && a>a2)*0;
     int a1_ = (a1>a && a1>a2)*1;
-    int a2_ = (a2>a && a2>a1)*2; 
+    int a2_ = (a2>a && a2>a1)*2;
     F[(t*L+Lidx_g)]=final_score;
     BT[t*(L)+Lidx_g]=Lidx_g-(a_+a1_+a2_);
+    //if(Lidx_g==3072) printf("Total Score %i %f Base score %f\n",t,final_score,score);
     smem[(((t+1)%2))*Lidx_dim+(Lidx_t+L_pad)]=final_score;
     if(offset>0){ //need to make sure results are propagated from previous parts of the calculation when GPU-blocking is done
       if(Lidx_t==0){
         smem[(((t+1)%2))*Lidx_dim+Lidx_t] = F[t*L+Lidx_g-2];
-      }
-      else if(Lidx_t==1){
-        smem[(((t+1)%2))*Lidx_dim+Lidx_t] = F[t*L+Lidx_g-1];
-      } 
+	smem[(((t+1)%2))*Lidx_dim+Lidx_t+1] = F[t*L+Lidx_g-1];	
+      }				  
     }
     __syncthreads();
   }

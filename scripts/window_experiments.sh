@@ -32,7 +32,7 @@ do
 	echo "Output File ${out_file}"
 	echo "Error File ${err_file}" 
 	echo "--------------------------------------------------------------"
-	sbatch --time "24:00:00" --exclude="c[78-94],c[60]" -J window -o $PAUL_NANOPORE_DATA/${out_file} -e $PAUL_NANOPORE_DATA/${err_file} -N 1 -p ${GPU} --wrap "bonito basecaller dna_r9.4.1@v2 $PAUL_NANOPORE_DATA/${fast5_path} --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes 204 ${byte_index} --hedges_params $PAUL_NANOPORE_DATA/hedges_decode_ctc_debug/hedges_options.json --disable_half --window ${window} --trellis base --processes 8 --lower_index ${lower_index} --upper_index ${upper_index}"
+	echo sbatch --time "24:00:00" --exclude="c[78-94],c[60]" -J window -o $PAUL_NANOPORE_DATA/${out_file} -e $PAUL_NANOPORE_DATA/${err_file} -N 1 -p ${GPU} --wrap "bonito basecaller dna_r9.4.1@v2 $PAUL_NANOPORE_DATA/${fast5_path} --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes 204 ${byte_index} --hedges_params $PAUL_NANOPORE_DATA/hedges_decode_ctc_debug/hedges_options.json --disable_half --window ${window} --trellis base --processes 8 --lower_index ${lower_index} --upper_index ${upper_index}"
     done
 done
 

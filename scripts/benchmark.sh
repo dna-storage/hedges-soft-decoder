@@ -26,7 +26,7 @@ echo "RUNNING window benchmark experiments"
 	echo "Output File ${out_file}"
 	echo "Error File ${err_file}" 
 	echo "--------------------------------------------------------------"
-	sbatch --time "24:00:00" $exclude -J benchmark -o $PAUL_NANOPORE_DATA/${out_file} -e $PAUL_NANOPORE_DATA/${err_file} -N 1 -p ${GPU} --wrap "${preamble_commands} python debug/hedges_ctc_debug.py $PAUL_NANOPORE_DATA/strand_1_benchmark_scores $PAUL_NANOPORE_DATA/hedges_decode_ctc_debug/hedges_options.json --window_size ${window} --trellis base  ${batch}"
+	echo sbatch --time "24:00:00" $exclude -J benchmark -o $PAUL_NANOPORE_DATA/${out_file} -e $PAUL_NANOPORE_DATA/${err_file} -N 1 -p ${GPU} --wrap "${preamble_commands} python debug/hedges_ctc_debug.py $PAUL_NANOPORE_DATA/strand_1_benchmark_scores $PAUL_NANOPORE_DATA/hedges_decode_ctc_debug/hedges_options.json --window_size ${window} --trellis base  ${batch}"
     done
 
 
@@ -59,6 +59,6 @@ echo "RUNNING beam benchmark experiments"
 	echo "Output File ${out_file}"
 	echo "Error File ${err_file}" 
 	echo "--------------------------------------------------------------"
-	sbatch --time "24:00:00" ${exclude} -J benchmark -o $PAUL_NANOPORE_DATA/${out_file} -e $PAUL_NANOPORE_DATA/${err_file} -N 1 -p ${GPU} --wrap "${preamble_commands} python debug/hedges_ctc_debug.py $PAUL_NANOPORE_DATA/strand_1_benchmark_scores $PAUL_NANOPORE_DATA/hedges_decode_ctc_debug/hedges_options.json --trellis beam_1 ${batch}"
+	echo sbatch --time "24:00:00" ${exclude} -J benchmark -o $PAUL_NANOPORE_DATA/${out_file} -e $PAUL_NANOPORE_DATA/${err_file} -N 1 -p ${GPU} --wrap "${preamble_commands} python debug/hedges_ctc_debug.py $PAUL_NANOPORE_DATA/strand_1_benchmark_scores $PAUL_NANOPORE_DATA/hedges_decode_ctc_debug/hedges_options.json --trellis beam_1 ${batch}"
  
 

@@ -5,13 +5,13 @@ source /home/${USER}/.bashrc
 lower_index=0
 upper_index=10000
 PREFIX=""
-sim="221118_dna_nanopore_experimental"
+sim="DeepSimulator"
 window_size=(0)
 VERSION=""
 GPU="rtx2060super"
 DENSITY="1667"
 DATA_HOME="/mnt/beegfs/kvolkel/221118_nanopore_dna"
-strands=($(ls ${DATA_HOME}/${sim}/${DENSITY}_fast5/| grep -Eo "_[0-9]_+" | grep -Eo "[0-9]+"))
+strands=($(ls ${DATA_HOME}/${sim}/${DENSITY}_fast5/| grep -Eo "_[1-2]_" | grep -Eo "[1-2]"))
 
 echo "RUNNING ctc experiments"
 for s in ${strands[@]};

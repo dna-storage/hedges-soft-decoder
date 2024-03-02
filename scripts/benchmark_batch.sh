@@ -4,12 +4,12 @@ source /home/${USER}/.bashrc
 module unload cuda
 conda activate bonito_cuda
 
-PREFIX=""
-batch_size=(2 4 8 16 32 64 100)
+PREFIX="rna_"
+RNA_FLAG="--rna"
+batch_size=(1 2 4 8 16 32 64 100)
 
 GPU="rtx2060super"
-exclude="--exclude=\"c21,c32,c34,c[58-59],c68\""
-
+exclude="--exclude=c21,c32,c34,c[58-59],c68"
 
 
 echo "RUNNING batch benchmark experiments"
@@ -25,5 +25,5 @@ echo "RUNNING batch benchmark experiments"
 	echo "Output File ${out_file}"
 	echo "Error File ${err_file}" 
 	echo "--------------------------------------------------------------"
-	sbatch --time "24:00:00" ${exclude}  -J benchmark_batch -o $PAUL_NANOPORE_DATA/${out_file} -e $PAUL_NANOPORE_DATA/${err_file} -N 1 -p ${GPU} --wrap "python debug/hedges_ctc_debug.py $PAUL_NANOPORE_DATA/strand_1_benchmark_scores $PAUL_NANOPORE_DATA/hedges_decode_ctc_debug/hedges_options.json --batch ${batch} --trellis base"
+	sbatch --time "24:00:00" ${exclude}  -J benchmark_batch -o $PAUL_NANOPORE_DATA/${out_file} -e $PAUL_NANOPORE_DATA/${err_file} -N 1 -p ${GPU} --wrap "python /home/kvolkel/bonito/debug/hedges_ctc_debug.py $PAUL_NANOPORE_DATA/${PREFIX}strand_1_benchmark_scores $PAUL_NANOPORE_DATA/hedges_decode_ctc_debug/hedges_options.json --batch ${batch} --trellis base ${RNA_FLAG}"
     done

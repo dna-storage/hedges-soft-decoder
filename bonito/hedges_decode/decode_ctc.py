@@ -10,9 +10,11 @@ import torch
 import dnastorage.codec.hedges_hooks as hedges_hooks
 import cupy as cp
 import os
+import pickle
 
 #get env variables
 PLOT = os.getenv("PLOT",False)
+plot_counter=1
 
 class HedgesBonitoScoreBase:
     def init_initial_state_F(self,scores:torch.Tensor)->torch.Tensor:
@@ -60,10 +62,16 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
     @classmethod
     def insert_blanks(cls,seq:torch.Tensor)->torch.Tensor:
         #blanks should be index 0 in the alphabet
-        N,L = seq.size()
-        ret_tensor = seq.new_zeros((N,L*2+1,),dtype=torch.int64)
-        ret_tensor[:,1::2]=seq
-        return ret_tensor 
+        if len(seq.size())==2:
+            N,L = seq.size()
+            ret_tensor = seq.new_zeros((N,L*2+1,),dtype=torch.int64)
+            ret_tensor[:,1::2]=seq
+            return ret_tensor
+        else:
+            L=seq.size(0)
+            ret_tensor = seq.new_zeros((L*2+1,),dtype=torch.int64)
+            ret_tensor[1::2]=seq
+            return ret_tensor
     
     def init_initial_state_F(self, scores:torch.Tensor,reverse:torch.Tensor,virtual_score_endpoints:torch.Tensor) -> torch.Tensor:
         N,T,I = scores.size()
@@ -111,6 +119,7 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
 
     def forward_step(self, scores: torch.Tensor, base_transitions: torch.Tensor, F: torch.Tensor, initial_bases:torch.Tensor, strand_index:int,
                      nbits:int,alpha_t:torch.Tensor,time_range_end:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        global plot_counter
         """
         @brief      Calculates a forward step in the hedges ctc algorithm
         @param      scores Txlen(alphabet) tensor of state scores
@@ -143,6 +152,13 @@ class HedgesBonitoCTC(HedgesBonitoScoreBase):
         #calculate valid ranges of t to avoid unnecessary iterations
         out_scores = self._fwd_algorithm(targets,scores,mask,F,lower_t_range,upper_t_range,self._device,using_window,
                                          lower_t_range-self._current_F_virtual_indexes[:,0],alpha_t,time_range_end,self._current_F_virtual_indexes)
+        if PLOT and strand_index==(100*3*plot_counter)or strand_index==303:
+            #plot_scores(alpha_t[0,:,:,:],lower_t_range[0],upper_t_range[0],True,plot_list=[0])
+            if not os.path.exists("score_peak_study"): os.mkdir("score_peak_study")
+            pickle.dump(alpha_t[0,:,:,:].to("cpu").numpy(),open("score_peak_study/strand_index_{}.scores".format(strand_index),"wb+"))
+            plot_counter+=1
+            #if plot_counter==3: exit(0)
+            #exit(1)
         self._current_F_virtual_indexes[:,:] = torch.stack([lower_t_range,upper_t_range],dim=1)
         return out_scores
 

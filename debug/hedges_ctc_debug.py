@@ -15,6 +15,7 @@ if __name__ =="__main__":
     parser.add_argument("--window_size",default=0,type=float,help="Window Size")
     parser.add_argument("--mod_states",default=0,type=int,help="mod states to use, only does something when trellis==mod")
     parser.add_argument("--batch",default=1,type=int,help="number of strands to batch together")
+    parser.add_argument("--rna",default=False,action="store_true",help="Use this option if you want decoding to occur based on RNA strands")
     args=parser.parse_args()
 
 
@@ -40,7 +41,7 @@ if __name__ =="__main__":
         logger.info("Batch Set Size: {}".format(scores["scores"].size()))
         time_start=time.time()
         batch=hd.hedges_decode(read,scores,args.hedges_parameters,b,False,alphabet,1,endpoint_str,window=args.window_size,
-                           trellis=args.trellis,mod_states=args.mod_states)
+                               trellis=args.trellis,mod_states=args.mod_states,rna=args.rna)
         time_end=time.time()
         logger.info("Batch Completed in: {} seconds".format(time_end-time_start))
         for x in batch:

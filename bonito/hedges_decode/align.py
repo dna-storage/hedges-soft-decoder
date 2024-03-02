@@ -100,32 +100,34 @@ class AlignCTCGPU(Align):
 
 class Alignment: #new return class to bundle information about alignment
     def __init__(self) -> None:
-        self.ctc_encoding=""
+        self.ctc_encoding=np.zeros(1)
         self.alignment_start=0
         self.alignment_end=0
         self.alignment_score=0
 
 
-    @property.setter
-    def alignment_start(self,start:int):self._alignment_start=start
+
     @property
     def alignment_start(self): return self._alignment_start
-
-    @property.setter
-    def alignment_end(self,end:int):self._alignment_end=end
+    @alignment_start.setter
+    def alignment_start(self,start:int):self._alignment_start=start
+    
     @property
     def alignment_end(self): return self._alignment_end
+    @alignment_end.setter
+    def alignment_end(self,end:int):self._alignment_end=end
+    
 
-    @property.setter
-    def alignment_score(self,score:float):self._alignment_score=score
     @property
     def alignment_score(self): return self._alignment_score
+    @alignment_score.setter
+    def alignment_score(self,score:float):self._alignment_score=score
+    
 
-    @property.setter
-    def ctc_encoding(self,encoding:str):self._ctc_encoding=encoding
     @property
     def ctc_encoding(self): return self._ctc_encoding
-
+    @ctc_encoding.setter
+    def ctc_encoding(self,encoding:str):self._ctc_encoding=encoding
 
 
 
@@ -136,10 +138,10 @@ class LongStrandAlignCTCGPU(Align):
         super().__init__(alphabet, device)
     
     def get_index_range(self,BT:np.ndarray,F:torch.Tensor,target_indexes:torch.Tensor)->tuple[np.ndarray,np.ndarray]:
-        argmax_t = torch.argmax(F[:,-1],dim=1) 
+        argmax_t = torch.argmax(F[:,-1],dim=0) 
         alignment_range = np.ndarray((2,),dtype=np.int32) #(2,) tensor
         alignment_indexes = []
-        current_strand_index = BT.shape[1]
+        current_strand_index = BT.shape[1]-1
         current_time_index = int(argmax_t)
         while current_strand_index>=0:
             current_symbol = target_indexes[current_strand_index] #collect symbols as we go through time
@@ -155,34 +157,38 @@ class LongStrandAlignCTCGPU(Align):
         #right now, long strand aligner only handles 1 strand at a time, ineffcient for GPU resources, but probably will get the job done quick enough
         T,B=scores.size()
         scores_gpu=scores.to(self._device)
-        target_indexes = HedgesBonitoCTC.string_to_indexes(seq,self._letter_to_index,device=self._device,batch=N)
+        target_indexes = HedgesBonitoCTC.string_to_indexes(seq,self._letter_to_index,device=self._device)
         target_indexes = HedgesBonitoCTC.insert_blanks(target_indexes)
         if remove_end_blanks: target_indexes=target_indexes[1:-1] #remove end blanks from the forced alignment
         BT = torch.full((T,target_indexes.size(0)),0,dtype=torch.int64,device=self._device) #backtrace to know where alignment ranges over T
         F = torch.full((T,target_indexes.size(0)),Log.zero,device=self._device) #forward calculating Trellis
         mask = target_indexes[:-2]==target_indexes[2:]
         mask=torch.nn.functional.pad(mask,(2,0),value=1)
-        mask = torch.where(mask,torch.full((target_indexes.size(1)),Log.zero,device=self._device),
-                           torch.full((target_indexes.size(1)),Log.one,device=self._device))
+        mask = torch.where(mask,torch.full((target_indexes.size(0),),Log.zero,device=self._device),
+                           torch.full((target_indexes.size(0),),Log.one,device=self._device))
         with cp.cuda.Device(0):
             L = target_indexes.size(0)
+            L_counter=L
             offset=0
             """
             problem here is that each L is dependent on the previous 2 positions (L-1,L-2), and so we can't just throw very long strands on 1 GPU kernel call by splitting
             positions across independent blocks.
             We need to call the GPU kernel multiple times to resolve the alignment, which should be possible by simple chunking of the L dimension.
             """
-            while L>0:
+            while L_counter>0:
                 L_threads = min(L,1024) #make sure we don't use too many threads that will fit in a block
-                LongStrandAlignCTCGPU.fwd_alg_kernel(grid=(1,1,1),block=(L_threads,1,1),shared_mem = (2*4*(L+2)),
+                LongStrandAlignCTCGPU.fwd_alg_kernel(grid=(1,1,1),block=(L_threads,1,1),shared_mem = (2*4*(L_threads+2)),
                                                      args=(scores_gpu.data_ptr(),target_indexes.data_ptr(),F.data_ptr(),
                                                            BT.data_ptr(),mask.data_ptr(),T,L,2,offset))
-                L-=L_threads
+                L_counter-=L_threads
                 offset+=L_threads #advance the offset 
-        lower_upper,alignment = self.get_index_range(BT.to("cpu").numpy(),F.to("cpu"))
-        max_score,arg_max = torch.max(F[:,-1],dim=1)
+
+        max_score,arg_max = torch.max(F[:,-1],dim=0)
+        lower_upper,ctc = self.get_index_range(BT.to("cpu").numpy(),F.to("cpu"),target_indexes.to("cpu"))
+        
         
         alignment.alignment_start = lower_upper[0]
         alignment.alignment_end = lower_upper[1]
         alignment.alignment_score=max_score.to("cpu")
+        alignment.ctc_encoding=ctc
         return alignment
