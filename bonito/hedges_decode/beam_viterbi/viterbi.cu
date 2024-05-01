@@ -107,7 +107,7 @@ beam_kernel_1(kernel_values_t* args){
 
         float new_score_blank = ZERO;
         float new_score_nonblank = ZERO;
-        if (msg_newbits != prev_best_paths.last_base[prev_st])
+        if ((msg_newbits+1) != prev_best_paths.last_base[prev_st]) //KV:msg_newbits update
         {
           new_score_nonblank =
               logsumexp2(prev_best_paths.score_blank[prev_st] + post[get_post_idx(t, msg_newbits + 1)],
@@ -136,7 +136,7 @@ beam_kernel_1(kernel_values_t* args){
         for (uint32_t j = 0; j < num_stay_candidates; j++)
         {
           uint32_t stay_candidate_index= get_candidate_idx(st_pos,st_conv,j);
-          if (msg_newbits == candidate_paths.last_base[stay_candidate_index])
+          if ((msg_newbits+1) == candidate_paths.last_base[stay_candidate_index]) //KV: msg_newbits updated
           {
             if (bitset_matrix_is_equal(msg,prev_st,candidate_paths.msg,stay_candidate_index))
             {

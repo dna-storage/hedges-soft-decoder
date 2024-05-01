@@ -228,4 +228,5 @@ def argparser():
     parser.add_argument("--lower_index",action="store",type=int,default=0,help="Index to start for basecalling in the data set, INCLUSIVE")
     parser.add_argument("--upper_index",action="store",type=int,default=10**9,help="Index to stop for basecalling, NOT_INCLUSIVE")
     parser.add_argument("--processes",action="store",type=int,default=1,help="processes to use for parallelizing basecalling")
+    print("YOU ARE RUNNING NO BATCH ALIGNMENT MATRIX",file=sys.stderr)
     return parser
