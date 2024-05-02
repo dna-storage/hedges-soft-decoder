@@ -232,4 +232,5 @@ def argparser():
     parser.add_argument("--processes",action="store",type=int,default=1,help="processes to use for parallelizing basecalling")
     parser.add_argument("--batch_size",action="store",type=int,default=1,help="number of strands to batch for basecalling")
     parser.add_argument("--ctc_fast5",action="store",type=str,default=None,help="filename for dumping ctc data from the decoder")
+    print("YOU ARE RUNNING BATCH ALIGNMENT MATRIX BASECALLER",file=sys.stderr)
     return parser
