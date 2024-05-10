@@ -34,10 +34,10 @@ if __name__ =="__main__":
     for read,scores in debug_data[::-1]:
         logger.info("Decoding Read: {}".format(read))
         logger.info(scores.size())
-        time_start=time.time()
+        time_start=time.perf_counter()()
         x=hd.hedges_decode(read,{"scores":scores},args.hedges_parameters,b,False,alphabet,1,endpoint_str,window=args.window_size,
                            trellis=args.trellis,mod_states=args.mod_states)
-        time_end=time.time()
+        time_end=time.perf_counter()()
         logger.info("Read Completed in: {} seconds".format(time_end-time_start))
         logger.info(x['sequence'])
         
