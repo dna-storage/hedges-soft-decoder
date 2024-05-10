@@ -1,3 +1,16 @@
+# Soft Decoding HEDGES Codes with Bonito
+
+This repository holds the code for the bioinformatics release of the Alignment Matrix algorithm and Beam Trellis algorithm used for soft decoding CTC matrices of nanopore reads. There are two main branches for this repository: `main` and `batch`. The `batch` branch implements parallelized read batching to enable higher thread occupancy of GPU devices. Due to the complexity of the HPC environment and dependencies, each branch is provided with an already built singularity image that can be used to create a container that already has all dependencies and installation steps completed. 
+
+## General Requirements
+
+* GPU devices to run the soft decoder algorithms. CPU implementation was depracated due to the extremely high overhead of decoding individual raeds.
+* Linux System for Singularity Containers (Rocky Linux release 8.9 (Green Obsidian) is the most recent OS tested with our implementations)
+* CUDA Drivers, (tested up to Driver Version 545.23.08).
+* A working installation of CUDA libraries and developer toolkits (Tested on Cuda Version 11.7, included in image)
+* PyTorch (Version 2.0.0, included in image)
+
+
 # Bonito
 
 [![PyPI version](https://badge.fury.io/py/ont-bonito.svg)](https://badge.fury.io/py/ont-bonito) 
