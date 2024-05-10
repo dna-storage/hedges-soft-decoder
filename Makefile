@@ -61,4 +61,5 @@ deb: clean
 
 develop: 
 	$(MAKE) -C bonito/hedges_decode/beam_viterbi
+	$(MAKE) -C fasthedges/ install
 	python setup.py develop

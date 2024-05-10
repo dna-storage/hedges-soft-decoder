@@ -34,19 +34,19 @@ if __name__ =="__main__":
     b = bytes([204,0])
     endpoint_str="GGCGACAGAAGAGTCAAGGTTC"
     #quick debug of decoding
-    benchmark_start_time = time.time()
+    benchmark_start_time = time.perf_counter()
     counter=0
     for read,scores in hedges_batch_scores(debug_data,args.batch):
         logger.info("Decoding Read: {}".format(read))
         logger.info("Batch Set Size: {}".format(scores["scores"].size()))
-        time_start=time.time()
+        time_start=time.perf_counter()
         batch=hd.hedges_decode(read,scores,args.hedges_parameters,b,False,alphabet,1,endpoint_str,window=args.window_size,
                                trellis=args.trellis,mod_states=args.mod_states,rna=args.rna)
-        time_end=time.time()
+        time_end=time.perf_counter()
         logger.info("Batch Completed in: {} seconds".format(time_end-time_start))
         for x in batch:
             logger.info(x['sequence'])
         counter+=1
         if counter==401: exit(0)
-    logger.info("Benchmark Completed in: {} seconds".format(time.time()-benchmark_start_time))
+    logger.info("Benchmark Completed in: {} seconds".format(time.perf_counter()-benchmark_start_time))
         
