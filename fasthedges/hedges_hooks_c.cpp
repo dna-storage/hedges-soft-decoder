@@ -2,6 +2,7 @@
 #include "fast_hedges.hpp"
 #include "shared_hedges.hpp"
 #include <cstdlib>
+#include <stdint.h>
 
 const std::map<int,int> mod_map = {{287, 0},{222,1},{220,2},{216,3},{203,4},{138,5},{149,6}}; //maps mods to linear index
 
@@ -135,7 +136,7 @@ mod_struct_t get_valid_mods(void* c, int nbits,int* next_states_buffer,int* next
 
 
 //Thomas Wang Hash function
-int hash6432shift(long key)
+int hash6432shift(int64_t key)
 {
   key = (~key) + (key << 18); // key = (key << 18) - key - 1;
   key = key ^ (key >> 31);
@@ -161,7 +162,7 @@ mod_struct_t get_valid_mods_hash(void* c, int nbits,int* next_states_buffer,int*
     context<Constraint> tmp_context = *current_context;
     tmp_context.nextSymbolWithUpdate(nbits,i,'A');
     mod_info.next_states[i] = tmp_context.prev&tmp_context.prev_mask;
-    long run_balance = ((long)tmp_context.constraint.get_run()<<32)|((long)tmp_context.constraint.get_gc_difference()&((long)(1<<32)-1));
+    int64_t run_balance = (((int64_t)tmp_context.constraint.get_run())<<32)|(((int64_t)tmp_context.constraint.get_gc_difference())&((((int64_t) 1)<<32)-1));
     int hash = hash6432shift(run_balance);
     mod_info.next_mods[i]=hash;
   }
