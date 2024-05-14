@@ -1,0 +1,44 @@
+BootStrap: library
+From: rockylinux:8
+
+%environment
+    export PATH=/miniconda3/bin:$PATH
+    export PYTHONPATH=/miniconda3/lib/python3.10/:$PYTHONPATH
+    
+%files
+./bonito.yml /env.yml
+./requirements.txt /requirements.txt
+./* /bonito_hedges/
+
+%post
+    # update and install essential dependencies
+    dnf update -y
+    dnf update && dnf install -y  automake  make automake gcc gcc-c++ kernel-devel bzip2 wget git  unzip
+    export PATH="/miniconda3/bin:$PATH"
+
+    # download, install, and update miniconda3
+    wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+    bash Miniconda3-latest-Linux-x86_64.sh -b -f -p /miniconda3/ && \
+    rm Miniconda3-latest-Linux-x86_64.sh
+    
+    # install dependencies via conda
+    export PATH="/miniconda3/bin:$PATH" 
+    . /miniconda3/etc/profile.d/conda.sh
+    conda env create -n bonito_cuda -f /env.yml 
+    
+    echo -e ". /miniconda3/etc/profile.d/conda.sh" >>$SINGULARITY_ENVIRONMENT\
+    && echo -e "\nconda activate bonito_cuda" >> $SINGULARITY_ENVIRONMENT\
+    && echo "echo \"Hello World\"" >> $SINGULARITY_ENVIRONMENT\
+
+
+    chmod -R 777 /miniconda3/
+
+    conda activate bonito_cuda &&\
+    python -m pip install -r /requirements.txt && \
+    conda clean --all -y && \
+    pip cache purge
+
+ 
+    #install code base into image
+    cd /bonito_hedges/ &&\
+    make develop
