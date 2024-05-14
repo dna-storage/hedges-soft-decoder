@@ -1,0 +1,7 @@
+{
+    "rate":0.125,
+    "seq_bytes":2,
+    "message_bytes":64,
+    "pad_bits":8,
+    "prev_bits":8
+}
