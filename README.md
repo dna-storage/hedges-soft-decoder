@@ -24,7 +24,7 @@ sudo singularity build bonito-hedges.sif build-bonito.def
 ```
 
 ## Pull Image from Library
-The following command pulls the iamge from Sylabs hosted libraries. No additional work should be neccessary if this approach is taken. 
+The following command pulls the iamge from Sylabs hosted libraries. No additional work should be neccessary if this approach is taken. As was mentioned before, this container only supports the fast-batched version of the Alignment Matrix algorithm.
 
 ```
 singularity pull bonito-hedges.sif library://kvolkel/nanopore-soft-decoders/soft-decode:batch
@@ -43,16 +43,43 @@ Commands utilize the same general interface used for basecalling with the base b
 
 ### Alignment Matrix Algorithm Command 
 
-The following command gives an overview of all relevant inputs and parameters for the soft-decoder. The first two arguments are paths to the model being used (weights and model config) and the FAST5 path of raw signals to be decoded (basecalled) respectively. The following two parameters `--disabel_half` and `--disable_koi` are included to make the bonito code base cooperate with the older CTC-based model. `--strand_pad` is the `3'` padding we force an alignment to for CTC matrix pruning, and `--hedges_bytes <byte list>` represents the index bytes that we factor out from the CTC matrix as well. `--hedges_params` is a path to the parameters describing the hedges code being used. `--trellis base` specifies that we are using a basic convolutional code trellis. `--batch_size <batch-size>` is the number of reads that will be decoded in parallel on the same GPU via batching of their matrices. `--window <window-size>` is a number between 0-1 that describes the percentage of time-steps that should be calculated during the forward algorithm portion of edge score calculation, NOTE: this is an experimental parameter and can degrade performance for any valuie <1 (e.g. using less than 100% of the total time steps available).
+Before running the following command, ensure that you are running an environment that supports the batched version of the Alignment Matrix Algorithm. An example of doing such is as follows:
 
 ```
-basecaller /bonito/bonito/models/dna_r9.4.1@v2  ./221118_dna_volkel_strand1_fast5_10_debug_subset --disable_half --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes <byte-list>204 0 --hedges_params ./hedges_options.json  --trellis base --batch_size <batch-size> --window <window-size> --lower_index <lower-index> --upper_index <upper-index>
+singularity pull bonito-hedges.sif library://kvolkel/nanopore-soft-decoders/soft-decode:batch
+singularity shell --nv  bonito-hedges.sif
 ```
 
+The following command gives an overview of all relevant inputs and parameters for the soft-decoder. The first two arguments are paths to the model being used (weights and model config) and the FAST5 path of raw signals to be decoded (basecalled) respectively. The following two parameters `--disabel_half` and `--disable_koi` are included to make the bonito code base cooperate with the older CTC-based model. `--strand_pad` is the `3'` padding we force an alignment to for CTC matrix pruning, and `--hedges_bytes <byte list>` represents the index bytes that we factor out from the CTC matrix as well. `--hedges_params` is a path to the parameters describing the hedges code being used. `--trellis base` specifies that we are using a basic convolutional code trellis. `--batch_size <batch-size>` is the number of reads that will be decoded in parallel on the same GPU via batching of their matrices. `--window <window-size>` is an optional number between 0-1 that describes the percentage of time-steps that should be calculated during the forward algorithm portion of edge score calculation, NOTE: this is an experimental parameter and can degrade performance for any value <1 (e.g. using less than 100% of the total time steps available). We found that any batch size up to about 32-50 is a reasonable choice to saturate GPU scheduling resources for an RTX 2060 Super NVIDIA GPU. `--lower_index <lower-index>` and `--upper_index <upper-index>` allow for limiting the number of reads decoded in a single run, e.g. `--lower_index 0` : `--upper_index 200` will complete the first 200 reads exactly. By default, the entire FAST5 data set is decoded. 
 
+NOTE: 
+* The output of the command (the basecalls/decoded DNA strings) will be written to stdout. 
+* The output only includes bases related to the HEDGES code, e.g. index and payload bytes. Auxillary regions like padding, poly-A, etc. are not output.
+
+```
+basecaller /bonito_hedges/bonito/models/dna_r9.4.1@v2  /bonito_hedges/example/221118_dna_volkel_strand1_fast5_10_debug_subset --disable_half --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes <byte-list> --hedges_params /bonito_hedges/example/hedges_options.json  --trellis base --batch_size <batch-size> --window <window-size> --lower_index <lower-index> --upper_index <upper-index>
+```
 
 
 ### Beam Trellis Algorithm Command
+
+Running the GPU version of the beam trellis algorithm is mostly the same, the only steps that need to be taken first is to start the appropriate environment by doing something like the following:
+
+```
+git clone  https://github.com/dna-storage/bonito_hedges
+cd bonito_hedges
+git checkout hedges_decode 
+sudo singularity build bonito-hedges.sif build-bonito.def
+singularity shell --nv  bonito-hedges.sif
+```
+
+Then, the Beam Trellis can be run with the following command. This is mostly the same command, but we do not support batching for the Beam Trellis algorithm because of the already large load of threads that the Trellis places on the GPU devices. Note, the name of the trellis is changed from `base` to `beam_1` in this command. All other shown parameters retain the same meaning.
+
+```
+basecaller /bonito_hedges/bonito/models/dna_r9.4.1@v2  /bonito_hedges/example/221118_dna_volkel_strand1_fast5_10_debug_subset --disable_half --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes <byte-list> --hedges_params /bonito_hedges/example/hedges_options.json  --trellis beam_1 --lower_index <lower-index> --upper_index <upper-index>
+```
+
+
 
 
 
