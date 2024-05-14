@@ -59,7 +59,7 @@ deb: clean
 	(cd tmp; fakeroot dpkg -b . ../$(PACKAGE)_$(MAJOR).$(MINOR).$(SUB)-$(PATCH).deb)
 	rm -rf tmp
 
-develop: 
+develop:
+	$(MAKE) -C fasthedges/ install	
 	$(MAKE) -C bonito/hedges_decode/beam_viterbi
-	$(MAKE) -C fasthedges/ install
 	python setup.py develop
