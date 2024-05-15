@@ -79,6 +79,15 @@ Then, the Beam Trellis can be run with the following command. This is mostly the
 basecaller /bonito_hedges/bonito/models/dna_r9.4.1@v2  /bonito_hedges/example/221118_dna_volkel_strand1_fast5_10_debug_subset --disable_half --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes <byte-list> --hedges_params /bonito_hedges/example/hedges_options.json  --trellis beam_1 --lower_index <lower-index> --upper_index <upper-index>
 ```
 
+### Test Command to Verify Installation
+
+We include a small 10 read test FAST5 directory to ensure that the Bonito code base and our soft decoding libraries are installed properly. The following commands will start the Singularity image and then run the test data set. The expected output is a FASTQ file stream with no errors related to library imports. If you get errors that indicate CUDA libraries cannot be found, ensure that the `--nv` flag is used to start the container's execution. 
+
+``` shell
+bonito basecaller /bonito/bonito/models/dna_r9.4.1@v2  /bonito/hedges-test/221118_dna_volkel_strand1_fast5_10_debug_subset --disable_half --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes 204 0 --hedges_params /bonito/hedges-configs/231206_dna_datastorage_1667_batch_full_1667.json  --trellis base --batch_size 10
+```
+
+
 ## Using Soft Decoders as a Library
 
 After installing this package with `make develop` in a conda or native environment, or when running a container, the functions for CTC soft decoding of HEDGES can be imported to integrate with any model. That is, our algorithms and implementations are not necessarily dependent on the Bonito code base. This allows us to analyze soft decoding performance against any model that emits CTC data, and this flexibility is what allows us to evaluate the Alignment Matrix Algortihm with the RODAN RNA open source model. This can be accomplished with the following code:
@@ -111,9 +120,7 @@ All code related to the CTC soft decoding library can be found under the module 
 Core source code files for the Alignment Matrix Algortihm are: 
  - `./bonito/hedges_decode/hedges_decode.py` - top level functions for the soft decoding library 
  - `./bonito/hedges_decode/base_decode.py` - top level classes that implement the information flow of the HEDGES code trellis
- - `./bonito/hedges_decode/decode_ctc.py` - implementation of Alignment Matrix forward algorithm scoring mechanisms. This files calls CUDA implementations of the forward algorithm/edge score aggregation that can be found in `./bonito/hedges_decode/cuda/`.
-
-
+ - `./bonito/hedges_decode/decode_ctc.py` - implementation of Alignment Matrix forward algorithm scoring mechanisms. This file calls CUDA implementations of the forward algorithm/edge score aggregation that can be found in `./bonito/hedges_decode/cuda/`.
 
 
 
