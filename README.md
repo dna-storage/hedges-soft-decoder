@@ -79,11 +79,46 @@ Then, the Beam Trellis can be run with the following command. This is mostly the
 basecaller /bonito_hedges/bonito/models/dna_r9.4.1@v2  /bonito_hedges/example/221118_dna_volkel_strand1_fast5_10_debug_subset --disable_half --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes <byte-list> --hedges_params /bonito_hedges/example/hedges_options.json  --trellis beam_1 --lower_index <lower-index> --upper_index <upper-index>
 ```
 
+## Using Soft Decoders as a Library
+
+After installing this package with `make develop` in a conda or native environment, or when running a container, the functions for CTC soft decoding of HEDGES can be imported to integrate with any model. That is, our algorithms and implementations are not necessarily dependent on the Bonito code base. This allows us to analyze soft decoding performance against any model that emits CTC data, and this flexibility is what allows us to evaluate the Alignment Matrix Algortihm with the RODAN RNA open source model. This can be accomplished with the following code:
+
+``` python
+
+import bonito.hedges_decode.hedges_decode as hd
+
+ hedges_decode(read_id, #list of read-ids
+	scores_arg, #dictionary {"scores": NxTxA tensor of float32} N - number of batched reads, T - CTC time dimension A - Alphabet size 
+	hedges_params:str, #path to hedges parameters, examples can be found in the hedges-configs/ directory
+	hedges_bytes:bytes, #bytearray of bytes that represent the index of the read (identical to the <hedges_bytes> parameter to the command-line basecaller argument)
+	using_hedges_DNA_constraint:bool, #set whether the trellis should use constraints of HEDGES code in decoding process, set to False (feature not fully implemented yet)
+	alphabet:list, #alphabet of the CTC matrx - Bonito uses the array ["N", "A", "C", "G", "T"] which represents the character at each position of the CTC matrix 
+	endpoint_seq:str="", #endpoint string to force alignment for CTC trimming, indentical to the <strand_pad> command line parameter
+	window=0, #window to use for approximate alignments. Defaults to 0 which means 100% of the alignment is calculated. Any number>0 and <1 is considered as the percentage of window to calculate
+	trellis="base", #trellis type to use - usually this is "base"
+	rna=False, #whether RNA is being decoded or not, set to True if RNA CTC data so that only forward directions are considered
+	ctc_dump=None #Set to True if you want to extract the raw and pruned CTC data for a read, it is recomended to ensure your batch size is 1 in this case. Decoding only runs up to the pruning process.
+	)
+```
+
+You can find an example of using the standalone function in `./debug/hedges_ctc_debug.py`. The interface design was mostly driven to easily integrate with Bonito's handling of read information. We provide utilities in `./bonito/hedges_decode/hedges_decode_utils.py` that will iteratively generate and help package individual CTC score tensors for a set of reads into a single batch-tensor that is formatted for the functions `scores_arg` argument. Our port of the RODAN model to enable soft-decoder basecalling can be found at *link to RODAN-HEDGES link*.
+
+
+## Development
+
+All code related to the CTC soft decoding library can be found under the module `./bonito/hedges_decode`. Implementations of the Beam Trellis algorithm, including CUDA ports of the original algorithm, can be found at `./bonito/hedges_decode/beam_viterbi`. 
+
+Core source code files for the Alignment Matrix Algortihm are: 
+ - `./bonito/hedges_decode/hedges_decode.py` - top level functions for the soft decoding library 
+ - `./bonito/hedges_decode/base_decode.py` - top level classes that implement the information flow of the HEDGES code trellis
+ - `./bonito/hedges_decode/decode_ctc.py` - implementation of Alignment Matrix forward algorithm scoring mechanisms. This files calls CUDA implementations of the forward algorithm/edge score aggregation that can be found in `./bonito/hedges_decode/cuda/`.
+
 
 
 
 
 ### References
+ - [RODAN Open Source RNA Basecaller](https://github.com/biodlab/RODAN)
  - [Sequence Modeling With CTC](https://distill.pub/2017/ctc/)
  - [Quartznet: Deep Automatic Speech Recognition With 1D Time-Channel Separable Convolutions](https://arxiv.org/pdf/1910.10261.pdf)
  - [Pair consensus decoding improves accuracy of neural network basecallers for nanopore sequencing](https://www.biorxiv.org/content/10.1101/2020.02.25.956771v1.full.pdf)
