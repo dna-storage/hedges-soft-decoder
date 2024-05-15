@@ -45,17 +45,25 @@ def check_hedges_params(hedges_params_dict)->None:
         
 def hedges_decode(read_id,scores_arg,hedges_params:str,hedges_bytes:bytes,
                   using_hedges_DNA_constraint:bool,alphabet:list,stride=1,
-                  endpoint_seq:str="",window=0,trellis="base",mod_states=3,rna=False,ctc_dump=None)->dict:
+                  endpoint_seq:str="",window=0,trellis="base",mod_states=3,rna=False,ctc_dump=None)->list[dict]:
     """
         @brief      Top level function for decoding CTC-style outputes to hedges strands
 
         @details    Generates a base-call that should be a strand that satisfies the given hedges code
 
-        @param      scores  Log-probabilities for bases at a particular point in the signal
+        @param      read_id sequencing read identifiers for the scores being decoded
+        @param      scores Log-probabilities for bases at a particular point in the signal
         @param      hedges_params file that contains parameters for the hedges code
-        @param      hedges_bytes optional string of bytes to fast forward the decode process to
+        @param      hedges_bytes optional string of bytes to prune CTC matrices
         @param      using_hedges_DNA_cosntraint Boolean when True uses DNA constraint information of the hedges code in the trellis
+        @param      alphabet list of characters representing the positions of characters in the CTC data
         @param      stride parameter used to satisfy interface, has no purpose at the moment
+        @param      endpoint_seq sequence to align to to prune end of CTC matrices opposite of the index region
+        @param      window portion of alignments to calculate on forward pass
+        @param      trellis name of the trellis being run
+        @param      mod_states number of mod states to use in the extended trellis (somewhat deprecated)
+        @param      rna set to True if RNA, False otherwise
+        @param      ctc_dump set True if you want to dump the pruned CTC matrix of a read.
 
         @return     Dictionary with entries related to the output seqeunce
     """
