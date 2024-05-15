@@ -28,7 +28,7 @@ From: rockylinux:8
     
     echo -e ". /miniconda3/etc/profile.d/conda.sh" >>$SINGULARITY_ENVIRONMENT\
     && echo -e "\nconda activate bonito_cuda" >> $SINGULARITY_ENVIRONMENT\
-    && echo "echo \"Hello World\"" >> $SINGULARITY_ENVIRONMENT\
+    && echo "echo \"You are using the single-read Alignment Matrix and Beam Trellis Container\"" >> $SINGULARITY_ENVIRONMENT\
 
 
     chmod -R 777 /miniconda3/
