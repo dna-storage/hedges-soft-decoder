@@ -1,91 +1,135 @@
-# Bonito
+# Soft Decoding HEDGES Codes with Bonito
 
-[![PyPI version](https://badge.fury.io/py/ont-bonito.svg)](https://badge.fury.io/py/ont-bonito) 
-[![py38](https://img.shields.io/badge/python-3.8-brightgreen.svg)](https://img.shields.io/badge/python-3.8-brightgreen.svg)
-[![py39](https://img.shields.io/badge/python-3.9-brightgreen.svg)](https://img.shields.io/badge/python-3.9-brightgreen.svg)
-[![py310](https://img.shields.io/badge/python-3.10-brightgreen.svg)](https://img.shields.io/badge/python-3.10-brightgreen.svg)
-[![py311](https://img.shields.io/badge/python-3.11-brightgreen.svg)](https://img.shields.io/badge/python-3.11-brightgreen.svg)
-[![cu117](https://img.shields.io/badge/cuda-11.7-blue.svg)](https://img.shields.io/badge/cuda-11.7-blue.svg)
+This repository holds the code for the bioinformatics release of the Alignment Matrix algorithm and Beam Trellis algorithm used for soft decoding CTC matrices of nanopore reads. There are two main branches for this repository: `batch` and `no-batch`. The `batch` branch implements parallelized read batching to enable higher thread occupancy of GPU devices and is the primary branch of this project. Due to the complexity of the HPC environment and dependencies, each branch is provided with a singularity definition file that will install that branch and create an image that can be used to run our commands within the container. We also include a pre-built image available at https://cloud.sylabs.io/ of our Alignment Matrix algorithm, we do not include the port of the Beam Trellis Algorithm given space limitations for hosting images. In the following steps we will show how to build the images locally or pulling the pre-built image 
 
-Bonito is an open source research basecaller for Oxford Nanopore reads.
+## General Requirements
+The following are the main requirements for this repository to function. Our image builds include these dependencies (except for CUDA drivers which will be covered later) out of the box and no further installation of dependencies is required outside of singularity itself.
 
-For anything other than basecaller training or method development please use [dorado](https://github.com/nanoporetech/dorado).
+* Singularity is recomended to enable usage of our built images and definition files (Tested on Singularity Version 3.7.1-5.1.ohpc.2.1)
+* NVIDIA GPU devices to run the soft decoder algorithms. CPU implementation was depracated due to the extremely high overhead of decoding individual reads.
+* Linux System for Singularity Containers (Rocky Linux release 8.9 (Green Obsidian) is the most recent OS tested with our implementations)
+* CUDA Drivers, (tested up to Driver Version 545.23.08).
+* A working installation of CUDA libraries and developer toolkits (Tested on Cuda Version 11.7, included in the image build process)
+* PyTorch (Version 2.0.0, included in image)
 
-```bash
-$ pip install --upgrade pip
-$ pip install ont-bonito
-$ bonito basecaller dna_r10.4.1_e8.2_400bps_hac@v4.0.0 /data/reads > basecalls.bam
+## Building Image Locally
+
+The following is a set of commands to build an image for a branch locally. Here we assume that the image can be built on a platform that has sudo access. The image is also set up to enable access to all installed code for all users who run the container. Typically, shared HPC systems don't allow for sudo access to users, but after building the image on a local machine you should be able to move the `.sif` file to the shared HPC encvironment and run as a user there with no needed extra privileges. 
+
+```
+git clone  https://github.com/dna-storage/bonito_hedges
+cd bonito_hedges
+git checkout batch #Change "batch" to "no-batch" if you want to build the beam trellis version 
+sudo singularity build bonito-hedges.sif build-bonito.def
 ```
 
-Bonito supports writing aligned/unaligned `{fastq, sam, bam, cram}`.
+## Pull Image from Library
+The following command pulls the iamge from Sylabs hosted libraries. No additional work should be neccessary if this approach is taken. As was mentioned before, this container only supports the fast-batched version of the Alignment Matrix algorithm.
 
-```bash
-$ bonito basecaller dna_r10.4.1_e8.2_400bps_hac@v4.0.0 --reference reference.mmi /data/reads > basecalls.bam
+```
+singularity pull bonito-hedges.sif library://kvolkel/nanopore-soft-decoders/soft-decode:batch
 ```
 
-Bonito will download and cache the basecalling model automatically on first use but all models can be downloaded with -
+## Starting Up Images
 
-``` bash
-$ bonito download --models --show  # show all available models
-$ bonito download --models         # download all available models
+To run the image, we recommend running the image in shell mode as follows. Note, the `--nv` flag is necessary in order to obtain the necessary NVIDIA device driver libraries from the host system. All other necessary CUDA libraries used to develop this project are included in the image installation. So, care just needs to be taken that the CUDA libraries of the image (as noted in the General Requirements) are compatible with the drivers on the host system.
+
+```
+singularity shell --nv  bonito-hedges.sif
 ```
 
-## Modified Bases
+## Running Commands
+Commands utilize the same general interface used for basecalling with the base bonito software. The main input of the commands are a path to the fast5 data for the reads obtained from nanopore sequencing (simulated reads are possible as well using simulators like DeepSimulator or Squigulator). Outputs are fastq formatted files representing the basecall that was decoded from the soft decoders.
 
-Modified base calling is handled by [Remora](https://github.com/nanoporetech/remora).
+### Alignment Matrix Algorithm Command 
 
-```bash
-$ bonito basecaller dna_r10.4.1_e8.2_400bps_hac@v4.0.0 /data/reads --modified-bases 5mC --reference ref.mmi > basecalls_with_mods.bam
+Before running the following command, ensure that you are running an environment that supports the batched version of the Alignment Matrix Algorithm. An example of doing such is as follows:
+
+```
+singularity pull bonito-hedges.sif library://kvolkel/nanopore-soft-decoders/soft-decode:batch
+singularity shell --nv  bonito-hedges.sif
 ```
 
-See available modified base models with the ``remora model list_pretrained`` command.
+The following command gives an overview of all relevant inputs and parameters for the soft-decoder. The first two arguments are paths to the model being used (weights and model config) and the FAST5 path of raw signals to be decoded (basecalled) respectively. The following two parameters `--disabel_half` and `--disable_koi` are included to make the bonito code base cooperate with the older CTC-based model. `--strand_pad` is the `3'` padding we force an alignment to for CTC matrix pruning, and `--hedges_bytes <byte list>` represents the index bytes that we factor out from the CTC matrix as well. `--hedges_params` is a path to the parameters describing the hedges code being used. `--trellis base` specifies that we are using a basic convolutional code trellis. `--batch_size <batch-size>` is the number of reads that will be decoded in parallel on the same GPU via batching of their matrices. `--window <window-size>` is an optional number between 0-1 that describes the percentage of time-steps that should be calculated during the forward algorithm portion of edge score calculation, NOTE: this is an experimental parameter and can degrade performance for any value <1 (e.g. using less than 100% of the total time steps available). We found that any batch size up to about 32-50 is a reasonable choice to saturate GPU scheduling resources for an RTX 2060 Super NVIDIA GPU. `--lower_index <lower-index>` and `--upper_index <upper-index>` allow for limiting the number of reads decoded in a single run, e.g. `--lower_index 0` : `--upper_index 200` will complete the first 200 reads exactly. By default, the entire FAST5 data set is decoded. 
 
-## Training your own model
+NOTE: 
+* The output of the command (the basecalls/decoded DNA strings) will be written to stdout. 
+* The output only includes bases related to the HEDGES code, e.g. index and payload bytes. Auxillary regions like padding, poly-A, etc. are not output.
 
-To train a model using your own reads, first basecall the reads with the additional `--save-ctc` flag and use the output directory as the input directory for training.
-
-```bash
-$ bonito basecaller dna_r9.4.1 --save-ctc --reference reference.mmi /data/reads > /data/training/ctc-data/basecalls.sam
-$ bonito train --directory /data/training/ctc-data /data/training/model-dir
+```
+basecaller /bonito_hedges/bonito/models/dna_r9.4.1@v2  /bonito_hedges/example/221118_dna_volkel_strand1_fast5_10_debug_subset --disable_half --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes <byte-list> --hedges_params /bonito_hedges/example/hedges_options.json  --trellis base --batch_size <batch-size> --window <window-size> --lower_index <lower-index> --upper_index <upper-index>
 ```
 
-In addition to training a new model from scratch you can also easily fine tune one of the pretrained models.  
 
-```bash
-bonito train --epochs 1 --lr 5e-4 --pretrained dna_r10.4.1_e8.2_400bps_hac@v4.0.0 --directory /data/training/ctc-data /data/training/fine-tuned-model
+### Beam Trellis Algorithm Command
+
+Running the GPU version of the beam trellis algorithm is mostly the same, the only steps that need to be taken first is to start the appropriate environment by doing something like the following:
+
+```
+git clone  https://github.com/dna-storage/bonito_hedges
+cd bonito_hedges
+git checkout no-batch
+sudo singularity build bonito-hedges.sif build-bonito.def
+singularity shell --nv  bonito-hedges.sif
 ```
 
-If you are interested in method development and don't have you own set of reads then a pre-prepared set is provide.
+Then, the Beam Trellis can be run with the following command. This is mostly the same command, but we do not support batching for the Beam Trellis algorithm because of the already large load of threads that the Trellis places on the GPU devices. Note, the name of the trellis is changed from `base` to `beam_1` in this command. All other shown parameters retain the same meaning.
 
-```bash
-$ bonito download --training
-$ bonito train /data/training/model-dir
+```
+basecaller /bonito_hedges/bonito/models/dna_r9.4.1@v2  /bonito_hedges/example/221118_dna_volkel_strand1_fast5_10_debug_subset --disable_half --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes <byte-list> --hedges_params /bonito_hedges/example/hedges_options.json  --trellis beam_1 --lower_index <lower-index> --upper_index <upper-index>
 ```
 
-All training calls use Automatic Mixed Precision to speed up training. To disable this, set the `--no-amp` flag to True. 
+### Test Command to Verify Installation
 
-## Developer Quickstart
+We include a small 10 read test FAST5 directory to ensure that the Bonito code base and our soft decoding libraries are installed properly. The following commands will start the Singularity image and then run the test data set. The expected output is a FASTQ file stream with no errors related to library imports. If you get errors that indicate CUDA libraries cannot be found, ensure that the `--nv` flag is used to start the container's execution. 
 
-```bash
-$ git clone https://github.com/nanoporetech/bonito.git  # or fork first and clone that
-$ cd bonito
-$ python3 -m venv venv3
-$ source venv3/bin/activate
-(venv3) $ pip install --upgrade pip
-(venv3) $ pip install -r requirements.txt
-(venv3) $ python setup.py develop
+``` shell
+bonito basecaller /bonito/bonito/models/dna_r9.4.1@v2  /bonito/hedges-test/221118_dna_volkel_strand1_fast5_10_debug_subset --disable_half --disable_koi --strand_pad GGCGACAGAAGAGTCAAGGTTC --hedges_bytes 204 0 --hedges_params /bonito/hedges-configs/231206_dna_datastorage_1667_batch_full_1667.json  --trellis base --batch_size 10
 ```
 
-## Interface
 
- - `bonito view` - view a model architecture for a given `.toml` file and the number of parameters in the network.
- - `bonito train` - train a bonito model.
- - `bonito evaluate` - evaluate a model performance.
- - `bonito download` - download pretrained models and training datasets.
- - `bonito basecaller` - basecaller *(`.fast5` -> `.bam`)*.
+## Using Soft Decoders as a Library
+
+After installing this package with `make develop` in a conda or native environment, or when running a container, the functions for CTC soft decoding of HEDGES can be imported to integrate with any model. That is, our algorithms and implementations are not necessarily dependent on the Bonito code base. This allows us to analyze soft decoding performance against any model that emits CTC data, and this flexibility is what allows us to evaluate the Alignment Matrix Algortihm with the RODAN RNA open source model. This can be accomplished with the following code:
+
+``` python
+
+import bonito.hedges_decode.hedges_decode as hd
+
+ hedges_decode(read_id, #list of read-ids
+	scores_arg, #dictionary {"scores": NxTxA tensor of float32} N - number of batched reads, T - CTC time dimension A - Alphabet size 
+	hedges_params:str, #path to hedges parameters, examples can be found in the hedges-configs/ directory
+	hedges_bytes:bytes, #bytearray of bytes that represent the index of the read (identical to the <hedges_bytes> parameter to the command-line basecaller argument)
+	using_hedges_DNA_constraint:bool, #set whether the trellis should use constraints of HEDGES code in decoding process, set to False (feature not fully implemented yet)
+	alphabet:list, #alphabet of the CTC matrx - Bonito uses the array ["N", "A", "C", "G", "T"] which represents the character at each position of the CTC matrix 
+	endpoint_seq:str="", #endpoint string to force alignment for CTC trimming, indentical to the <strand_pad> command line parameter
+	window=0, #window to use for approximate alignments. Defaults to 0 which means 100% of the alignment is calculated. Any number>0 and <1 is considered as the percentage of window to calculate
+	trellis="base", #trellis type to use - usually this is "base"
+	rna=False, #whether RNA is being decoded or not, set to True if RNA CTC data so that only forward directions are considered
+	ctc_dump=None #Set to True if you want to extract the raw and pruned CTC data for a read, it is recomended to ensure your batch size is 1 in this case. Decoding only runs up to the pruning process.
+	)
+```
+
+You can find an example of using the standalone function in `./debug/hedges_ctc_debug.py`. The interface design was mostly driven to easily integrate with Bonito's handling of read information. We provide utilities in `./bonito/hedges_decode/hedges_decode_utils.py` that will iteratively generate and help package individual CTC score tensors for a set of reads into a single batch-tensor that is formatted for the functions `scores_arg` argument. Our port of the RODAN model to enable soft-decoder basecalling can be found at *link to RODAN-HEDGES link*.
+
+
+## Development
+
+All code related to the CTC soft decoding library can be found under the module `./bonito/hedges_decode`. Implementations of the Beam Trellis algorithm, including CUDA ports of the original algorithm, can be found at `./bonito/hedges_decode/beam_viterbi`. 
+
+Core source code files for the Alignment Matrix Algortihm are: 
+ - `./bonito/hedges_decode/hedges_decode.py` - top level functions for the soft decoding library 
+ - `./bonito/hedges_decode/base_decode.py` - top level classes that implement the information flow of the HEDGES code trellis
+ - `./bonito/hedges_decode/decode_ctc.py` - implementation of Alignment Matrix forward algorithm scoring mechanisms. This file calls CUDA implementations of the forward algorithm/edge score aggregation that can be found in `./bonito/hedges_decode/cuda/`.
+
+
+## Analysis Notebooks
+
+Notebooks generating figures used in the **Bioinformatics** submission and instructions for running the notebooks can be found in the `/bioinformatics-analysis` directory.  
+
 
 ### References
-
+ - [RODAN Open Source RNA Basecaller](https://github.com/biodlab/RODAN)
  - [Sequence Modeling With CTC](https://distill.pub/2017/ctc/)
  - [Quartznet: Deep Automatic Speech Recognition With 1D Time-Channel Separable Convolutions](https://arxiv.org/pdf/1910.10261.pdf)
  - [Pair consensus decoding improves accuracy of neural network basecallers for nanopore sequencing](https://www.biorxiv.org/content/10.1101/2020.02.25.956771v1.full.pdf)
@@ -98,6 +142,3 @@ Technologies, Ltd.  Public License, v. 1.0.  If a copy of the License
 was not distributed with this file, You can obtain one at
 http://nanoporetech.com
 
-### Research Release
-
-Research releases are provided as technology demonstrators to provide early access to features or stimulate Community development of tools. Support for this software will be minimal and is only provided directly by the developers. Feature requests, improvements, and discussions are welcome and can be implemented by forking and pull requests. However much as we would like to rectify every issue and piece of feedback users may have, the developers may have limited resource for support of this software. Research releases may be unstable and subject to rapid iteration by Oxford Nanopore Technologies.

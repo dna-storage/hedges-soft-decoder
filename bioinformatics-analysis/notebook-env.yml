@@ -1,0 +1,18 @@
+name: dnastorage
+channels:
+  - defaults
+dependencies:
+  - scipy==1.8.1
+  - pandas==1.4.3
+  - numpy==1.23.0
+  - matplotlib==3.5.2
+  - jupyter
+  - seaborn
+  - openpyxl
+  - h5py
+  - ipympl
+  - biopython
+  - scikit-learn
+  - mpmath
+prefix: /home/kevin/miniconda3/envs/dnastorage
+
