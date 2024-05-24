@@ -1,6 +1,6 @@
 # Soft Decoding HEDGES Codes with Bonito
 
-This repository holds the code for the bioinformatics release of the Alignment Matrix algorithm and Beam Trellis algorithm used for soft decoding CTC matrices of nanopore reads. There are two main branches for this repository: `main` and `batch`. The `batch` branch implements parallelized read batching to enable higher thread occupancy of GPU devices. Due to the complexity of the HPC environment and dependencies, each branch is provided with a singularity definition file that will install that branch and create an image that can be used to run our commands within the container. We also include a pre-built image available at https://cloud.sylabs.io/ of our Alignment Matrix algorithm, we do not include the port of the Beam Trellis Algorithm given space limitations for hosting images. In the following steps we will show how to build the images locally or pulling the pre-built image 
+This repository holds the code for the bioinformatics release of the Alignment Matrix algorithm and Beam Trellis algorithm used for soft decoding CTC matrices of nanopore reads. There are two main branches for this repository: `batch` and `no-batch`. The `batch` branch implements parallelized read batching to enable higher thread occupancy of GPU devices and is the primary branch of this project. Due to the complexity of the HPC environment and dependencies, each branch is provided with a singularity definition file that will install that branch and create an image that can be used to run our commands within the container. We also include a pre-built image available at https://cloud.sylabs.io/ of our Alignment Matrix algorithm, we do not include the port of the Beam Trellis Algorithm given space limitations for hosting images. In the following steps we will show how to build the images locally or pulling the pre-built image 
 
 ## General Requirements
 The following are the main requirements for this repository to function. Our image builds include these dependencies (except for CUDA drivers which will be covered later) out of the box and no further installation of dependencies is required outside of singularity itself.
@@ -19,7 +19,7 @@ The following is a set of commands to build an image for a branch locally. Here 
 ```
 git clone  https://github.com/dna-storage/bonito_hedges
 cd bonito_hedges
-git checkout batch #Change "batch" to "hedges_decode" if you want to build the beam trellis version 
+git checkout batch #Change "batch" to "no-batch" if you want to build the beam trellis version 
 sudo singularity build bonito-hedges.sif build-bonito.def
 ```
 
@@ -68,7 +68,7 @@ Running the GPU version of the beam trellis algorithm is mostly the same, the on
 ```
 git clone  https://github.com/dna-storage/bonito_hedges
 cd bonito_hedges
-git checkout hedges_decode 
+git checkout no-batch
 sudo singularity build bonito-hedges.sif build-bonito.def
 singularity shell --nv  bonito-hedges.sif
 ```
@@ -122,6 +122,10 @@ Core source code files for the Alignment Matrix Algortihm are:
  - `./bonito/hedges_decode/base_decode.py` - top level classes that implement the information flow of the HEDGES code trellis
  - `./bonito/hedges_decode/decode_ctc.py` - implementation of Alignment Matrix forward algorithm scoring mechanisms. This file calls CUDA implementations of the forward algorithm/edge score aggregation that can be found in `./bonito/hedges_decode/cuda/`.
 
+
+## Analysis Notebooks
+
+Notebooks generating figures used in the **Bioinformatics** submission and instructions for running the notebooks can be found in the `/bioinformatics-analysis` directory.  
 
 
 ### References
