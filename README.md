@@ -123,9 +123,11 @@ Core source code files for the Alignment Matrix Algortihm are:
  - `./bonito/hedges_decode/decode_ctc.py` - implementation of Alignment Matrix forward algorithm scoring mechanisms. This file calls CUDA implementations of the forward algorithm/edge score aggregation that can be found in `./bonito/hedges_decode/cuda/`.
 
 
-## Analysis Notebooks
+## Analysis Notebooks and Encoded Data
 
-Notebooks generating figures used in the **Bioinformatics** submission and instructions for running the notebooks can be found in the `/bioinformatics-analysis` directory.  
+Notebooks generating figures used in the **Bioinformatics** submission and instructions for running the notebooks can be found in the `/bioinformatics-analysis` directory. The raw data that was encoded for experiments, and the exact set of strands that were ordered for synthesis can be found in the `/encoded-data` directory. The synthesized strands are found in the spreadsheet `/encoded-data/synthesized-strands.xlsx`.
+
+
 
 
 ### References
