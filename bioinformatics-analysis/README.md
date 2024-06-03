@@ -9,7 +9,7 @@ conda env create -f notebook-env.yml
 Then, download the raw input data for the notebooks by running:
 
 ```
-wget TODO:ADD LINK TO RELEASE DATA
+wget https://github.com/dna-storage/hedges-soft-decoder/releases/download/v1.0/bioinformatics-notebook-data.tar.gz
 tar -xzvf bioinformatics-notebook-data.tar.gz
 ```
 
