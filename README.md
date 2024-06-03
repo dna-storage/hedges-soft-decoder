@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.11454877.svg)](https://doi.org/10.5281/zenodo.11454877)
+
 # Soft Decoding HEDGES Codes with Bonito
 
 This repository holds the code for the bioinformatics release of the Alignment Matrix algorithm and Beam Trellis algorithm used for soft decoding CTC matrices of nanopore reads. There are two main branches for this repository: `batch` and `no-batch`. The `batch` branch implements parallelized read batching to enable higher thread occupancy of GPU devices and is the primary branch of this project. Due to the complexity of the HPC environment and dependencies, each branch is provided with a singularity definition file that will install that branch and create an image that can be used to run our commands within the container. We also include a pre-built image available at https://cloud.sylabs.io/library/kvolkel/nanopore-soft-decoders/soft-decode of our Alignment Matrix algorithm, we do not include the port of the Beam Trellis Algorithm given space limitations for hosting images. In the following steps we will show how to build the images locally or pulling the pre-built image 
