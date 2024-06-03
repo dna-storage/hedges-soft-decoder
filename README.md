@@ -110,7 +110,7 @@ import bonito.hedges_decode.hedges_decode as hd
 	)
 ```
 
-You can find an example of using the standalone function in `./debug/hedges_ctc_debug.py`. The interface design was mostly driven to easily integrate with Bonito's handling of read information. We provide utilities in `./bonito/hedges_decode/hedges_decode_utils.py` that will iteratively generate and help package individual CTC score tensors for a set of reads into a single batch-tensor that is formatted for the functions `scores_arg` argument. Our port of the RODAN model to enable soft-decoder basecalling can be found at *link to RODAN-HEDGES link*.
+You can find an example of using the standalone function in `./debug/hedges_ctc_debug.py`. The interface design was mostly driven to easily integrate with Bonito's handling of read information. We provide utilities in `./bonito/hedges_decode/hedges_decode_utils.py` that will iteratively generate and help package individual CTC score tensors for a set of reads into a single batch-tensor that is formatted for the functions `scores_arg` argument. Our port of the RODAN model to enable soft-decoder basecalling can be found at https://github.com/dna-storage/RODAN-HEDGES.
 
 
 ## Development
