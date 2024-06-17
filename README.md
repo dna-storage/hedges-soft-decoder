@@ -138,7 +138,7 @@ Notebooks generating figures used in the **Bioinformatics** submission and instr
  - [Quartznet: Deep Automatic Speech Recognition With 1D Time-Channel Separable Convolutions](https://arxiv.org/pdf/1910.10261.pdf)
  - [Pair consensus decoding improves accuracy of neural network basecallers for nanopore sequencing](https://www.biorxiv.org/content/10.1101/2020.02.25.956771v1.full.pdf)
 
-### Licence and Copyright
+### License and Copyright
 (c) 2019 Oxford Nanopore Technologies Ltd.
 
 Bonito is distributed under the terms of the Oxford Nanopore
