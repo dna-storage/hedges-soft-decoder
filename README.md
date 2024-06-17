@@ -1,5 +1,8 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.11454877.svg)](https://doi.org/10.5281/zenodo.11454877)
 
+# Raw Data 
+**Data used for nominal data set evaluation, no Q Score partitioning**  [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.11985455.svg)](https://doi.org/10.5281/zenodo.11985455)
+
 # Soft Decoding HEDGES Codes with Bonito
 
 This repository holds the code for the release of the Alignment Matrix algorithm and Beam Trellis algorithm used for soft decoding CTC matrices of nanopore reads. There are two main branches for this repository: `batch` and `no-batch`. The `batch` branch implements parallelized read batching to enable higher thread occupancy of GPU devices and is the primary branch of this project. Due to the complexity of the HPC environment and dependencies, each branch is provided with a singularity definition file that will install that branch and create an image that can be used to run our commands within the container. We also include a pre-built image available at https://cloud.sylabs.io/library/kvolkel/nanopore-soft-decoders/soft-decode of our Alignment Matrix algorithm, we do not include the port of the Beam Trellis Algorithm given space limitations for hosting images. In the following steps we will show how to build the images locally or pulling the pre-built image 
@@ -127,10 +130,7 @@ Core source code files for the Alignment Matrix Algortihm are:
 
 ## Analysis Notebooks and Encoded Data
 
-Notebooks generating figures used in the **Bioinformatics** submission and instructions for running the notebooks can be found in the `/bioinformatics-analysis` directory. The raw data that was encoded for experiments, and the exact set of strands that were ordered for synthesis can be found in the `/encoded-data` directory. The synthesized strands are found in the spreadsheet `/encoded-data/synthesized-strands.xlsx`.
-
-
-
+Notebooks generating figures used in the manuscript and instructions for running the notebooks can be found in the `/bioinformatics-analysis` directory. The raw data that was encoded for experiments, and the exact set of strands that were ordered for synthesis can be found in the `/encoded-data` directory. The synthesized strands are found in the spreadsheet `/encoded-data/synthesized-strands.xlsx`.
 
 ### References
  - [RODAN Open Source RNA Basecaller](https://github.com/biodlab/RODAN)
