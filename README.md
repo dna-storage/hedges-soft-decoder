@@ -1,7 +1,11 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.11454877.svg)](https://doi.org/10.5281/zenodo.11454877)
 
 # Raw Data 
+
 **Data used for nominal data set evaluation, no Q Score partitioning**  [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.11985455.svg)](https://doi.org/10.5281/zenodo.11985455)
+**Data used for Q Score partitioning analysis** [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.12014515.svg)](https://doi.org/10.5281/zenodo.12014515)
+
+
 
 # Soft Decoding HEDGES Codes with Bonito
 
